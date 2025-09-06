@@ -33,9 +33,10 @@ jobs:
       - name: Configurar Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0' # Puedes ajustar la versión si usas otra
+          # --- CAMBIO REALIZADO AQUÍ ---
+          flutter-version: '3.22.2' 
           channel: 'stable'
-          cache: true # Activa la caché para acelerar futuras compilaciones
+          cache: true 
 
       # 4. Instala las dependencias del proyecto
       - name: Instalar dependencias
