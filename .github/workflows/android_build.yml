@@ -1,0 +1,55 @@
+# Nombre del flujo de trabajo que aparecerá en la pestaña "Actions" de GitHub
+name: Compilar APK de Android
+
+# Define cuándo se debe ejecutar este flujo de trabajo
+on:
+  # Se activa cada vez que haces un "push" a la rama "main"
+  push:
+    branches:
+      - main
+  # También permite ejecutarlo manualmente desde la interfaz de GitHub
+  workflow_dispatch:
+
+# Define los trabajos (jobs) que se ejecutarán
+jobs:
+  build:
+    # El tipo de máquina virtual que se usará para la compilación
+    runs-on: ubuntu-latest
+
+    # Los pasos que componen el trabajo
+    steps:
+      # 1. Descarga el código de tu repositorio a la máquina virtual
+      - name: Descargar código del repositorio
+        uses: actions/checkout@v4
+
+      # 2. Configura el entorno de Java, necesario para compilar en Android
+      - name: Configurar Java (JDK)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 3. Configura el entorno de Flutter
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.0' # Puedes ajustar la versión si usas otra
+          channel: 'stable'
+          cache: true # Activa la caché para acelerar futuras compilaciones
+
+      # 4. Instala las dependencias del proyecto
+      - name: Instalar dependencias
+        run: flutter pub get
+
+      # 5. Compila el APK en modo de lanzamiento (release)
+      - name: Compilar APK
+        run: flutter build apk --release
+
+      # 6. Sube el APK generado como un "artefacto" para que puedas descargarlo
+      - name: Subir artefacto (APK)
+        uses: actions/upload-artifact@v4
+        with:
+          # Nombre del archivo que podrás descargar desde GitHub
+          name: app-chofer-release
+          # Ruta donde se encuentra el APK generado
+          path: build/app/outputs/flutter-apk/app-release.apk

@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart'; // <-- LÍNEA CORREGIDA
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:location/location.dart'; // <-- 1. IMPORTAMOS LOCATION
 
 class TripDetailScreen extends StatefulWidget {
   final String reservaId;
@@ -21,6 +22,12 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   GoogleMapController? _mapController;
   final Set<Marker> _markers = {};
 
+  // --- 2. VARIABLES PARA EL RASTREO DE UBICACIÓN ---
+  final Location _locationService = Location();
+  StreamSubscription<LocationData>? _locationSubscription;
+  bool _isTrackingStarted = false;
+  // ---
+
   @override
   void initState() {
     super.initState();
@@ -30,6 +37,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   @override
   void dispose() {
     _viajeSubscription?.cancel();
+    _detenerRastreoUbicacion(); // Detenemos el rastreo al salir
     _mapController?.dispose();
     super.dispose();
   }
@@ -48,13 +56,74 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           _isLoading = false;
         });
         _updateMarkersAndCamera();
+        _gestionarRastreo(); // Gestionamos si el rastreo debe iniciar o no
       }
     });
   }
 
-  Future<void> _actualizarEstado(String nuevoEstado) async {
+  // --- 3. NUEVA LÓGICA DE RASTREO ---
+  void _gestionarRastreo() {
+    if (_viajeData == null || _isTrackingStarted) return;
+
+    final estado = _viajeData!['estado'];
+    if (estado is Map) {
+      final estadoPrincipal = estado['principal'];
+      // Inicia el rastreo si el viaje está confirmado, en origen o en curso
+      if (['Asignado', 'En Origen', 'Viaje Iniciado']
+          .contains(estadoPrincipal)) {
+        _iniciarRastreoUbicacion();
+        _isTrackingStarted = true;
+      }
+    }
+  }
+
+  Future<void> _iniciarRastreoUbicacion() async {
+    try {
+      final serviceEnabled = await _locationService.serviceEnabled();
+      if (!serviceEnabled) {
+        if (!await _locationService.requestService()) return;
+      }
+
+      var permissionGranted = await _locationService.hasPermission();
+      if (permissionGranted == PermissionStatus.denied) {
+        permissionGranted = await _locationService.requestPermission();
+        if (permissionGranted != PermissionStatus.granted) return;
+      }
+
+      _locationSubscription =
+          _locationService.onLocationChanged.handleError((error) {
+        print("Error en el stream de ubicación: $error");
+        _locationSubscription?.cancel();
+        setState(() => _locationSubscription = null);
+      }).listen((LocationData currentLocation) {
+        if (currentLocation.latitude != null &&
+            currentLocation.longitude != null) {
+          FirebaseFunctions.instanceFor(region: 'us-central1')
+              .httpsCallable('actualizarUbicacionChofer')
+              .call({
+            'latitud': currentLocation.latitude,
+            'longitud': currentLocation.longitude,
+          });
+        }
+      });
+    } catch (e) {
+      print("Error al iniciar el rastreo de ubicación: $e");
+    }
+  }
+
+  void _detenerRastreoUbicacion() {
+    _locationSubscription?.cancel();
+    _locationSubscription = null;
+  }
+  // --- FIN DE LÓGICA DE RASTREO ---
+
+  // --- 4. FUNCIÓN _actualizarEstado MODIFICADA ---
+  Future<void> _actualizarEstado(Map<String, dynamic> nuevoEstado) async {
     if (_isUpdatingState) return;
     setState(() => _isUpdatingState = true);
+
+    // Añadimos el timestamp desde el cliente para referencia
+    nuevoEstado['actualizado_en'] = FieldValue.serverTimestamp();
 
     try {
       final actualizar = FirebaseFunctions.instanceFor(region: 'us-central1')
@@ -78,31 +147,55 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     }
   }
 
+  // --- 5. LÓGICA DE BOTONES COMPLETAMENTE RECONSTRUIDA ---
   Widget _buildActionButtons() {
-    if (_viajeData == null) return const SizedBox.shrink();
+    if (_viajeData == null || !(_viajeData!['estado'] is Map)) {
+      return const SizedBox.shrink();
+    }
 
-    final estado = _viajeData!['estado'];
+    final estado = _viajeData!['estado'] as Map<String, dynamic>;
+    final estadoPrincipal = estado['principal'];
+    final estadoDetalle = estado['detalle'];
+
     String buttonText = '';
-    String nextState = '';
+    Map<String, dynamic> nextState = {};
     VoidCallback? onPressed;
 
     final origen = _viajeData!['origen'] ?? '';
     final destino = _viajeData!['destino'] ?? '';
 
-    switch (estado) {
-      case 'Aceptado':
-        buttonText = 'Llegué al Origen';
-        nextState = 'En Origen';
+    switch (estadoPrincipal) {
+      case 'Asignado':
+        if (estadoDetalle == 'Enviada al chofer') {
+          buttonText = 'Confirmar Viaje';
+          nextState = {
+            'principal': 'Asignado',
+            'detalle': 'Confirmada por chofer'
+          };
+        } else {
+          // 'Confirmada por chofer'
+          buttonText = 'Llegué al Origen';
+          nextState = {
+            'principal': 'En Origen',
+            'detalle': 'Chofer en domicilio'
+          };
+        }
         onPressed = () => _actualizarEstado(nextState);
         break;
       case 'En Origen':
-        buttonText = 'Iniciar Viaje';
-        nextState = 'Viaje Iniciado';
+        buttonText = 'Iniciar Viaje (Pasajero a Bordo)';
+        nextState = {
+          'principal': 'Viaje Iniciado',
+          'detalle': 'Pasajero a Bordo'
+        };
         onPressed = () => _actualizarEstado(nextState);
         break;
       case 'Viaje Iniciado':
         buttonText = 'Finalizar Viaje';
-        nextState = 'Finalizado';
+        nextState = {
+          'principal': 'Finalizado',
+          'detalle': 'Traslado Concluido'
+        };
         onPressed = () => _actualizarEstado(nextState);
         break;
       default:
@@ -126,14 +219,14 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
     Widget navButton = OutlinedButton.icon(
       icon: const Icon(Icons.navigation),
-      label: Text(estado == 'Viaje Iniciado'
+      label: Text(estadoPrincipal == 'Viaje Iniciado'
           ? 'Navegar al Destino'
           : 'Navegar al Origen'),
       style: OutlinedButton.styleFrom(
         side: BorderSide(color: Theme.of(context).colorScheme.secondary),
       ),
-      onPressed: () =>
-          _abrirNavegacion(estado == 'Viaje Iniciado' ? destino : origen),
+      onPressed: () => _abrirNavegacion(
+          estadoPrincipal == 'Viaje Iniciado' ? destino : origen),
     );
 
     return Column(
@@ -185,9 +278,10 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       _mapController!.animateCamera(CameraUpdate.newLatLngZoom(
           LatLng(origenCoords.latitude, origenCoords.longitude), 14));
     }
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
+  // --- 6. FUNCIÓN DE NAVEGACIÓN CORREGIDA ---
   Future<void> _abrirNavegacion(String? direccion) async {
     if (direccion == null || direccion.isEmpty) {
       print('La dirección de destino está vacía.');
@@ -200,6 +294,9 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         await launchUrl(googleMapsUrl, mode: LaunchMode.externalApplication);
       } else {
         print('No se pudo abrir Google Maps');
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('No se pudo abrir Google Maps.')));
       }
     } catch (e) {
       print('Error al lanzar URL: $e');
@@ -213,7 +310,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _viajeData == null
-              ? const Center(child: Text('El viaje ha sido finalizado.'))
+              ? const Center(
+                  child: Text('El viaje ha sido finalizado o cancelado.'))
               : _buildTripDetails(),
     );
   }
@@ -243,7 +341,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
             child: ListView(
               children: [
                 _buildDetailRow(Icons.person, 'Pasajero', pasajero),
-                _buildDetailRow(Icons.phone, 'Teléfono', telefono),
+                _buildDetailRow(Icons.phone, 'Teléfono', telefono,
+                    canCall: true),
                 _buildDetailRow(Icons.trip_origin, 'Origen', origen),
                 _buildDetailRow(Icons.flag, 'Destino', destino),
                 _buildDetailRow(Icons.notes, 'Observaciones', observaciones),
@@ -259,7 +358,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     );
   }
 
-  Widget _buildDetailRow(IconData icon, String label, String value) {
+  Widget _buildDetailRow(IconData icon, String label, String value,
+      {bool canCall = false}) {
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -271,7 +371,17 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                   children: [
                 Text(label, style: const TextStyle(color: Colors.white70)),
                 Text(value, style: const TextStyle(fontSize: 16))
-              ]))
+              ])),
+          if (canCall && value != 'N/A')
+            IconButton(
+              icon: const Icon(Icons.call),
+              onPressed: () async {
+                final Uri launchUri = Uri(scheme: 'tel', path: value);
+                if (await canLaunchUrl(launchUri)) {
+                  await launchUrl(launchUri);
+                }
+              },
+            )
         ]));
   }
 }
