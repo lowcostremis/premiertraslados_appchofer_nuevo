@@ -5,6 +5,22 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+// --- INICIO DE LA ADAPTACIÓN INTELIGENTE ---
+// Estas líneas determinan qué sintaxis usar (con o sin paréntesis)
+// dependiendo de tu versión de Flutter. Funcionará en ambos entornos.
+val flutterVersionCode = try {
+    flutter.versionCode()
+} catch (e: Exception) {
+    flutter.versionCode
+}
+
+val flutterVersionName = try {
+    flutter.versionName()
+} catch (e: Exception) {
+    flutter.versionName
+}
+// --- FIN DE LA ADAPTACIÓN INTELIGENTE ---
+
 android {
     namespace = "com.example.premiertraslados_appchofer_nuevo"
     compileSdk = flutter.compileSdkVersion
@@ -20,20 +36,20 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.premiertraslados_appchofer_nuevo"
-        minSdk = 21 // o el número que tengas
-        targetSdk = 34 // o el número que tengas
-        // --- CAMBIO AQUÍ ---
-        versionCode = flutter.versionCode()
-        versionName = flutter.versionName()
+        minSdk = flutter.minSdkVersion
+        targetSdk = 34
+        
+        // Usamos las variables inteligentes que definimos arriba
+        versionCode = flutterVersionCode
+        versionName = flutterVersionName
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            [cite_start]// TODO: Add your own signing config for the release build. [cite: 3]
+            [cite_start]// Signing with the debug keys for now, so `flutter run --release` works. [cite: 4]
+            [cite_start]signingConfig = signingConfigs.getByName("debug") [cite: 5]
         }
     }
 }
