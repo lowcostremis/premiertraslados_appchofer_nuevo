@@ -4,10 +4,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:premiertraslados_appchofer_nuevo/login_screen.dart';
-// --- ADAPTACIÓN: Importamos la nueva pantalla de detalles ---
 import 'package:premiertraslados_appchofer_nuevo/trip_detail_screen.dart';
 
-// El resto de la app (main, MyApp, AuthWrapper) no necesita cambios.
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
@@ -54,7 +52,7 @@ class AuthWrapper extends StatelessWidget {
 }
 
 // =======================================================================
-// --- PANTALLA DE INICIO CON LISTA DE VIAJES ACTIVOS ---
+// --- PANTALLA DE INICIO CON LISTA DE VIAJES ACTIVOS (CÓDIGO CORREGIDO) ---
 // =======================================================================
 
 class HomeScreen extends StatefulWidget {
@@ -66,9 +64,9 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _nuevosViajesSubscription;
-  StreamSubscription? _viajesAceptadosSubscription;
+  StreamSubscription? _viajesActivosSubscription;
   String? _choferId;
-  final List<DocumentSnapshot> _viajesAceptados = [];
+  final List<DocumentSnapshot> _viajesActivos = [];
   bool _isLoading = true;
 
   @override
@@ -80,7 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _nuevosViajesSubscription?.cancel();
-    _viajesAceptadosSubscription?.cancel();
+    _viajesActivosSubscription?.cancel();
     super.dispose();
   }
 
@@ -96,39 +94,46 @@ class _HomeScreenState extends State<HomeScreen> {
           .get();
 
       if (choferQuery.docs.isEmpty) {
-        setState(() => _isLoading = false);
+        if (mounted) setState(() => _isLoading = false);
         return;
       }
       _choferId = choferQuery.docs.first.id;
 
+      // --- CAMBIO AQUÍ: Escucha por nuevas reservas enviadas al chofer ---
       final nuevosViajesQuery = FirebaseFirestore.instance
           .collection('reservas')
           .where('chofer_asignado_id', isEqualTo: _choferId)
-          .where('estado', isEqualTo: 'Asignado');
+          .where('estado.principal', isEqualTo: 'Asignado')
+          .where('estado.detalle', isEqualTo: 'Enviada al chofer');
 
       _nuevosViajesSubscription =
           nuevosViajesQuery.snapshots().listen((snapshot) {
         for (var change in snapshot.docChanges) {
           if (change.type == DocumentChangeType.added) {
             if (mounted) {
-              _mostrarNotificacionDeViaje(change.doc.id, change.doc.data());
+              _mostrarNotificacionDeViaje(
+                  change.doc.id, change.doc.data() as Map<String, dynamic>?);
             }
           }
         }
       });
 
-      final viajesAceptadosQuery = FirebaseFirestore.instance
+      // --- CAMBIO AQUÍ: Escucha por todos los viajes activos del chofer ---
+      final viajesActivosQuery = FirebaseFirestore.instance
           .collection('reservas')
           .where('chofer_asignado_id', isEqualTo: _choferId)
-          .where('estado', isEqualTo: 'Aceptado');
+          .where('estado.principal',
+              whereIn: ['Asignado', 'En Origen', 'Viaje Iniciado']);
 
-      _viajesAceptadosSubscription =
-          viajesAceptadosQuery.snapshots().listen((snapshot) {
-        setState(() {
-          _viajesAceptados.clear();
-          _viajesAceptados.addAll(snapshot.docs);
-          _isLoading = false;
-        });
+      _viajesActivosSubscription =
+          viajesActivosQuery.snapshots().listen((snapshot) {
+        if (mounted) {
+          setState(() {
+            _viajesActivos.clear();
+            _viajesActivos.addAll(snapshot.docs);
+            _isLoading = false;
+          });
+        }
       });
     } catch (e) {
       print("Error al iniciar listeners: $e");
@@ -156,7 +161,8 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: <Widget>[
             TextButton(
               child: const Text('Rechazar'),
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.of(context)
+                  .pop(), // Se podría implementar una lógica de rechazo aquí
             ),
             FilledButton(
               child: const Text('Aceptar'),
@@ -171,12 +177,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- CAMBIO AQUÍ: Aceptar un viaje ahora actualiza con el estado detallado ---
   Future<void> _aceptarViaje(String reservaId) async {
     try {
       await FirebaseFirestore.instance
           .collection('reservas')
           .doc(reservaId)
-          .update({'estado': 'Aceptado'});
+          .update({
+        'estado': {
+          'principal': 'Asignado',
+          'detalle': 'Confirmada por chofer',
+          'actualizado_en': FieldValue.serverTimestamp(),
+        }
+      });
     } catch (e) {
       print("Error al aceptar el viaje: $e");
     }
@@ -186,7 +199,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_viajesAceptados.isEmpty) {
+    if (_viajesActivos.isEmpty) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(16.0),
@@ -199,10 +212,15 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
     return ListView.builder(
-      itemCount: _viajesAceptados.length,
+      itemCount: _viajesActivos.length,
       itemBuilder: (context, index) {
-        final viajeDoc = _viajesAceptados[index];
+        final viajeDoc = _viajesActivos[index];
         final viaje = viajeDoc.data() as Map<String, dynamic>;
+
+        // --- CAMBIO AQUÍ: Extraemos el detalle del estado para mostrarlo ---
+        final estadoDetalle = (viaje['estado'] is Map)
+            ? viaje['estado']['detalle'] ?? viaje['estado']['principal']
+            : viaje['estado'];
 
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -210,9 +228,8 @@ class _HomeScreenState extends State<HomeScreen> {
             leading: const Icon(Icons.directions_car, color: Colors.amber),
             title: Text('Origen: ${viaje['origen'] ?? 'N/A'}'),
             subtitle: Text(
-                'Destino: ${viaje['destino'] ?? 'N/A'}\nPasajero: ${viaje['nombre_pasajero'] ?? 'N/A'}'),
+                'Destino: ${viaje['destino'] ?? 'N/A'}\nEstado: $estadoDetalle'), // Mostramos el estado detallado
             isThreeLine: true,
-            // --- ADAPTACIÓN: Lógica de navegación a la pantalla de detalle ---
             onTap: () {
               Navigator.push(
                 context,
