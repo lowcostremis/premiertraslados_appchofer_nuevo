@@ -3,12 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+// Importaciones para el rastreo de ubicación
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:location/location.dart';
+
 import 'package:premiertraslados_appchofer_nuevo/login_screen.dart';
 import 'package:premiertraslados_appchofer_nuevo/trip_detail_screen.dart';
+import 'package:premiertraslados_appchofer_nuevo/firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const MyApp());
 }
 
@@ -51,10 +58,6 @@ class AuthWrapper extends StatelessWidget {
   }
 }
 
-// =======================================================================
-// --- PANTALLA DE INICIO CON LISTA DE VIAJES ACTIVOS (CÓDIGO MODIFICADO) ---
-// =======================================================================
-
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -63,10 +66,16 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  StreamSubscription? _nuevosViajesSubscription;
   StreamSubscription? _viajesActivosSubscription;
   String? _choferId;
   final List<DocumentSnapshot> _viajesActivos = [];
   bool _isLoading = true;
+
+  // --- NUEVO: Variables para el rastreo de ubicación global ---
+  final Location _locationService = Location();
+  StreamSubscription<LocationData>? _locationSubscription;
+  // --- FIN NUEVO ---
 
   @override
   void initState() {
@@ -76,7 +85,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _nuevosViajesSubscription?.cancel();
     _viajesActivosSubscription?.cancel();
+    // --- NUEVO: Detener el rastreo al cerrar la pantalla ---
+    _detenerRastreoGlobal();
+    // --- FIN NUEVO ---
     super.dispose();
   }
 
@@ -97,8 +110,28 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       _choferId = choferQuery.docs.first.id;
 
-      // --- CAMBIO: Se elimina el listener de "nuevos viajes" y la notificación.
-      // Ahora solo escuchamos todos los viajes activos asignados al chofer.
+      // --- NUEVO: Iniciar el rastreo de ubicación global ---
+      _iniciarRastreoGlobal();
+      // --- FIN NUEVO ---
+
+      final nuevosViajesQuery = FirebaseFirestore.instance
+          .collection('reservas')
+          .where('chofer_asignado_id', isEqualTo: _choferId)
+          .where('estado.principal', isEqualTo: 'Asignado')
+          .where('estado.detalle', isEqualTo: 'Enviada al chofer');
+
+      _nuevosViajesSubscription =
+          nuevosViajesQuery.snapshots().listen((snapshot) {
+        for (var change in snapshot.docChanges) {
+          if (change.type == DocumentChangeType.added) {
+            if (mounted) {
+              _mostrarNotificacionDeViaje(
+                  change.doc.id, change.doc.data() as Map<String, dynamic>?);
+            }
+          }
+        }
+      });
+
       final viajesActivosQuery = FirebaseFirestore.instance
           .collection('reservas')
           .where('chofer_asignado_id', isEqualTo: _choferId)
@@ -118,6 +151,123 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       print("Error al iniciar listeners: $e");
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // --- NUEVO: Método para iniciar el rastreo de ubicación ---
+  Future<void> _iniciarRastreoGlobal() async {
+    try {
+      // Activar el modo de fondo para que siga funcionando
+      await _locationService.enableBackgroundMode(enable: true);
+
+      final serviceEnabled = await _locationService.serviceEnabled();
+      if (!serviceEnabled) {
+        if (!await _locationService.requestService()) return;
+      }
+
+      var permissionGranted = await _locationService.hasPermission();
+      if (permissionGranted == PermissionStatus.denied) {
+        permissionGranted = await _locationService.requestPermission();
+        if (permissionGranted != PermissionStatus.granted) return;
+      }
+
+      // Evitar iniciar múltiples listeners
+      if (_locationSubscription != null) {
+        _locationSubscription?.cancel();
+      }
+
+      _locationSubscription =
+          _locationService.onLocationChanged.handleError((error) {
+        print("Error en el stream de ubicación: $error");
+        _locationSubscription?.cancel();
+        setState(() => _locationSubscription = null);
+      }).listen((LocationData currentLocation) {
+        if (currentLocation.latitude != null &&
+            currentLocation.longitude != null) {
+          // Usamos la función de Firebase para actualizar la ubicación
+          FirebaseFunctions.instanceFor(region: 'us-central1')
+              .httpsCallable('actualizarUbicacionChofer')
+              .call({
+            'latitud': currentLocation.latitude,
+            'longitud': currentLocation.longitude,
+          });
+        }
+      });
+    } catch (e) {
+      print("Error al iniciar el rastreo de ubicación global: $e");
+    }
+  }
+  // --- FIN NUEVO ---
+
+  // --- NUEVO: Método para detener el rastreo de ubicación ---
+  Future<void> _detenerRastreoGlobal() async {
+    _locationSubscription?.cancel();
+    _locationSubscription = null;
+
+    // Opcional: Limpiar las coordenadas en Firestore al desconectar
+    if (_choferId != null) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('choferes')
+            .doc(_choferId!)
+            .update({'coordenadas': FieldValue.delete()});
+      } catch (e) {
+        print("Error al limpiar coordenadas: $e");
+      }
+    }
+  }
+  // --- FIN NUEVO ---
+
+  void _mostrarNotificacionDeViaje(
+      String reservaId, Map<String, dynamic>? viajeData) {
+    if (viajeData == null || !mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('¡Nuevo Viaje Asignado!'),
+          content: SingleChildScrollView(
+            child: ListBody(
+              children: <Widget>[
+                Text('Origen: ${viajeData['origen'] ?? 'N/A'}'),
+                Text('Destino: ${viajeData['destino'] ?? 'N/A'}'),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Rechazar'),
+              onPressed: () => Navigator.of(context)
+                  .pop(), // Se podría implementar una lógica de rechazo aquí
+            ),
+            FilledButton(
+              child: const Text('Aceptar'),
+              onPressed: () {
+                _aceptarViaje(reservaId);
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _aceptarViaje(String reservaId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('reservas')
+          .doc(reservaId)
+          .update({
+        'estado': {
+          'principal': 'Asignado',
+          'detalle': 'Aceptada',
+          'actualizado_en': FieldValue.serverTimestamp(),
+        }
+      });
+    } catch (e) {
+      print("Error al aceptar el viaje: $e");
     }
   }
 
@@ -147,21 +297,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ? viaje['estado']['detalle'] ?? viaje['estado']['principal']
             : viaje['estado'];
 
-        // --- CAMBIO: Se agrega un indicador visual para viajes que requieren acción ---
-        bool necesitaAccion = estadoDetalle == 'Enviada al chofer';
-
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          shape: necesitaAccion
-              ? RoundedRectangleBorder(
-                  side: const BorderSide(color: Colors.amber, width: 2),
-                  borderRadius: BorderRadius.circular(12),
-                )
-              : null,
           child: ListTile(
-            leading: Icon(
-                necesitaAccion ? Icons.new_releases : Icons.directions_car,
-                color: Colors.amber),
+            leading: const Icon(Icons.directions_car, color: Colors.amber),
             title: Text('Origen: ${viaje['origen'] ?? 'N/A'}'),
             subtitle: Text(
                 'Destino: ${viaje['destino'] ?? 'N/A'}\nEstado: $estadoDetalle'),
@@ -189,7 +328,12 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () => FirebaseAuth.instance.signOut(),
+            onPressed: () async {
+              // --- NUEVO: Detener rastreo antes de cerrar sesión ---
+              await _detenerRastreoGlobal();
+              // --- FIN NUEVO ---
+              FirebaseAuth.instance.signOut();
+            },
           ),
         ],
       ),
