@@ -20,13 +20,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.premiertraslados_appchofer_nuevo"
-        minSdk = flutter.minSdkVersion 
-        targetSdk = 34
-        
-        // --- SINTAXIS CORREGIDA PARA TU ENTORNO LOCAL ---
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+          applicationId = "com.example.premiertraslados_appchofer_nuevo"
+        minSdk = 21 // Asegúrate que este número sea el correcto para tu proyecto
+        targetSdk = 34 // Asegúrate que este número sea el correcto para tu proyecto
+        versionCode = flutter.versionCode()
+        versionName = flutter.versionName()
     }
 
     buildTypes {
