@@ -34,9 +34,6 @@ fun getVersionCode(): Int {
 
 plugins {
     id("com.android.application")
-    // START: FlutterFire Configuration
-    id("com.google.gms.google-services")
-    // END: FlutterFire Configuration
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
 }
@@ -49,8 +46,6 @@ android {
         disable += "Instantiatable"
     }
 
-    // --- SOLUCIÓN AL ERROR DE JVM TARGET ---
-    // Se asegura que tanto Java como Kotlin compilen para la misma versión (1.8)
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
@@ -59,11 +54,11 @@ android {
     kotlinOptions {
         jvmTarget = "1.8"
     }
-    // --- FIN DE LA SOLUCIÓN ---
 
     defaultConfig {
         applicationId = "com.example.premiertraslados_appchofer_nuevo"
-        minSdk = flutter.minSdkVersion
+        // --- ESTA ES LA LÍNEA CORREGIDA ---
+        minSdk = 23
         targetSdk = 34
 
         versionCode = getVersionCode()
