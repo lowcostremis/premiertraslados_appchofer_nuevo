@@ -52,7 +52,7 @@ class AuthWrapper extends StatelessWidget {
 }
 
 // =======================================================================
-// --- PANTALLA DE INICIO CON LISTA DE VIAJES ACTIVOS (CÓDIGO CORREGIDO) ---
+// --- PANTALLA DE INICIO CON LISTA DE VIAJES ACTIVOS (CÓDIGO MODIFICADO) ---
 // =======================================================================
 
 class HomeScreen extends StatefulWidget {
@@ -63,7 +63,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  StreamSubscription? _nuevosViajesSubscription;
   StreamSubscription? _viajesActivosSubscription;
   String? _choferId;
   final List<DocumentSnapshot> _viajesActivos = [];
@@ -77,7 +76,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _nuevosViajesSubscription?.cancel();
     _viajesActivosSubscription?.cancel();
     super.dispose();
   }
@@ -99,26 +97,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       _choferId = choferQuery.docs.first.id;
 
-      // --- CAMBIO AQUÍ: Escucha por nuevas reservas enviadas al chofer ---
-      final nuevosViajesQuery = FirebaseFirestore.instance
-          .collection('reservas')
-          .where('chofer_asignado_id', isEqualTo: _choferId)
-          .where('estado.principal', isEqualTo: 'Asignado')
-          .where('estado.detalle', isEqualTo: 'Enviada al chofer');
-
-      _nuevosViajesSubscription =
-          nuevosViajesQuery.snapshots().listen((snapshot) {
-        for (var change in snapshot.docChanges) {
-          if (change.type == DocumentChangeType.added) {
-            if (mounted) {
-              _mostrarNotificacionDeViaje(
-                  change.doc.id, change.doc.data() as Map<String, dynamic>?);
-            }
-          }
-        }
-      });
-
-      // --- CAMBIO AQUÍ: Escucha por todos los viajes activos del chofer ---
+      // --- CAMBIO: Se elimina el listener de "nuevos viajes" y la notificación.
+      // Ahora solo escuchamos todos los viajes activos asignados al chofer.
       final viajesActivosQuery = FirebaseFirestore.instance
           .collection('reservas')
           .where('chofer_asignado_id', isEqualTo: _choferId)
@@ -138,60 +118,6 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       print("Error al iniciar listeners: $e");
       if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  void _mostrarNotificacionDeViaje(
-      String reservaId, Map<String, dynamic>? viajeData) {
-    if (viajeData == null || !mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('¡Nuevo Viaje Asignado!'),
-          content: SingleChildScrollView(
-            child: ListBody(
-              children: <Widget>[
-                Text('Origen: ${viajeData['origen'] ?? 'N/A'}'),
-                Text('Destino: ${viajeData['destino'] ?? 'N/A'}'),
-              ],
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Rechazar'),
-              onPressed: () => Navigator.of(context)
-                  .pop(), // Se podría implementar una lógica de rechazo aquí
-            ),
-            FilledButton(
-              child: const Text('Aceptar'),
-              onPressed: () {
-                _aceptarViaje(reservaId);
-                Navigator.of(context).pop();
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  // --- CAMBIO AQUÍ: Aceptar un viaje ahora actualiza con el estado detallado ---
-  Future<void> _aceptarViaje(String reservaId) async {
-    try {
-      await FirebaseFirestore.instance
-          .collection('reservas')
-          .doc(reservaId)
-          .update({
-        'estado': {
-          'principal': 'Asignado',
-          'detalle': 'Confirmada por chofer',
-          'actualizado_en': FieldValue.serverTimestamp(),
-        }
-      });
-    } catch (e) {
-      print("Error al aceptar el viaje: $e");
     }
   }
 
@@ -217,18 +143,28 @@ class _HomeScreenState extends State<HomeScreen> {
         final viajeDoc = _viajesActivos[index];
         final viaje = viajeDoc.data() as Map<String, dynamic>;
 
-        // --- CAMBIO AQUÍ: Extraemos el detalle del estado para mostrarlo ---
         final estadoDetalle = (viaje['estado'] is Map)
             ? viaje['estado']['detalle'] ?? viaje['estado']['principal']
             : viaje['estado'];
 
+        // --- CAMBIO: Se agrega un indicador visual para viajes que requieren acción ---
+        bool necesitaAccion = estadoDetalle == 'Enviada al chofer';
+
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          shape: necesitaAccion
+              ? RoundedRectangleBorder(
+                  side: const BorderSide(color: Colors.amber, width: 2),
+                  borderRadius: BorderRadius.circular(12),
+                )
+              : null,
           child: ListTile(
-            leading: const Icon(Icons.directions_car, color: Colors.amber),
+            leading: Icon(
+                necesitaAccion ? Icons.new_releases : Icons.directions_car,
+                color: Colors.amber),
             title: Text('Origen: ${viaje['origen'] ?? 'N/A'}'),
             subtitle: Text(
-                'Destino: ${viaje['destino'] ?? 'N/A'}\nEstado: $estadoDetalle'), // Mostramos el estado detallado
+                'Destino: ${viaje['destino'] ?? 'N/A'}\nEstado: $estadoDetalle'),
             isThreeLine: true,
             onTap: () {
               Navigator.push(

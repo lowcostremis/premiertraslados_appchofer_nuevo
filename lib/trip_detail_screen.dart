@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:location/location.dart'; // <-- 1. IMPORTAMOS LOCATION
+import 'package:location/location.dart';
 
 class TripDetailScreen extends StatefulWidget {
   final String reservaId;
@@ -19,14 +19,9 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   bool _isLoading = true;
   bool _isUpdatingState = false;
 
-  GoogleMapController? _mapController;
-  final Set<Marker> _markers = {};
-
-  // --- 2. VARIABLES PARA EL RASTREO DE UBICACIÓN ---
   final Location _locationService = Location();
   StreamSubscription<LocationData>? _locationSubscription;
   bool _isTrackingStarted = false;
-  // ---
 
   @override
   void initState() {
@@ -37,8 +32,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   @override
   void dispose() {
     _viajeSubscription?.cancel();
-    _detenerRastreoUbicacion(); // Detenemos el rastreo al salir
-    _mapController?.dispose();
+    _detenerRastreoUbicacion();
     super.dispose();
   }
 
@@ -55,20 +49,16 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           _viajeData = snapshot.data();
           _isLoading = false;
         });
-        _updateMarkersAndCamera();
-        _gestionarRastreo(); // Gestionamos si el rastreo debe iniciar o no
+        _gestionarRastreo();
       }
     });
   }
 
-  // --- 3. NUEVA LÓGICA DE RASTREO ---
   void _gestionarRastreo() {
     if (_viajeData == null || _isTrackingStarted) return;
-
     final estado = _viajeData!['estado'];
     if (estado is Map) {
       final estadoPrincipal = estado['principal'];
-      // Inicia el rastreo si el viaje está confirmado, en origen o en curso
       if (['Asignado', 'En Origen', 'Viaje Iniciado']
           .contains(estadoPrincipal)) {
         _iniciarRastreoUbicacion();
@@ -79,6 +69,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
   Future<void> _iniciarRastreoUbicacion() async {
     try {
+      // (El código de rastreo de ubicación no se modifica)
       final serviceEnabled = await _locationService.serviceEnabled();
       if (!serviceEnabled) {
         if (!await _locationService.requestService()) return;
@@ -95,15 +86,28 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         print("Error en el stream de ubicación: $error");
         _locationSubscription?.cancel();
         setState(() => _locationSubscription = null);
-      }).listen((LocationData currentLocation) {
+      }).listen((LocationData currentLocation) async {
         if (currentLocation.latitude != null &&
             currentLocation.longitude != null) {
-          FirebaseFunctions.instanceFor(region: 'us-central1')
-              .httpsCallable('actualizarUbicacionChofer')
-              .call({
-            'latitud': currentLocation.latitude,
-            'longitud': currentLocation.longitude,
-          });
+          // Actualiza la ubicación del chofer en su propio documento
+          final user = FirebaseAuth.instance.currentUser;
+          if (user == null) return;
+
+          final choferQuery = await FirebaseFirestore.instance
+              .collection('choferes')
+              .where('auth_uid', isEqualTo: user.uid)
+              .limit(1)
+              .get();
+          if (choferQuery.docs.isNotEmpty) {
+            final choferId = choferQuery.docs.first.id;
+            await FirebaseFirestore.instance
+                .collection('choferes')
+                .doc(choferId)
+                .update({
+              'coordenadas': GeoPoint(
+                  currentLocation.latitude!, currentLocation.longitude!)
+            });
+          }
         }
       });
     } catch (e) {
@@ -115,39 +119,35 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     _locationSubscription?.cancel();
     _locationSubscription = null;
   }
-  // --- FIN DE LÓGICA DE RASTREO ---
 
-  // --- 4. FUNCIÓN _actualizarEstado MODIFICADA ---
+  // --- CAMBIO: Función genérica para actualizar estado ---
   Future<void> _actualizarEstado(Map<String, dynamic> nuevoEstado) async {
     if (_isUpdatingState) return;
     setState(() => _isUpdatingState = true);
-
-    // Añadimos el timestamp desde el cliente para referencia
-    nuevoEstado['actualizado_en'] = FieldValue.serverTimestamp();
-
     try {
-      final actualizar = FirebaseFunctions.instanceFor(region: 'us-central1')
-          .httpsCallable('actualizarEstadoViaje');
-      final result = await actualizar.call({
-        'reservaId': widget.reservaId,
-        'nuevoEstado': nuevoEstado,
+      await FirebaseFirestore.instance
+          .collection('reservas')
+          .doc(widget.reservaId)
+          .update({
+        'estado': {
+          'principal': nuevoEstado['principal'],
+          'detalle': nuevoEstado['detalle'],
+          'actualizado_en': FieldValue.serverTimestamp(),
+        }
       });
-      print(result.data['message']);
-    } on FirebaseFunctionsException catch (e) {
-      print("Error al llamar a la función: ${e.code} - ${e.message}");
+    } catch (e) {
+      print("Error al actualizar estado: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Error: ${e.message ?? 'No se pudo actualizar'}'),
-              backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red));
       }
     } finally {
       if (mounted) setState(() => _isUpdatingState = false);
     }
   }
 
-  // --- 5. LÓGICA DE BOTONES COMPLETAMENTE RECONSTRUIDA ---
+  // --- NUEVA LÓGICA DE BOTONES ---
   Widget _buildActionButtons() {
     if (_viajeData == null || !(_viajeData!['estado'] is Map)) {
       return const SizedBox.shrink();
@@ -157,134 +157,155 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     final estadoPrincipal = estado['principal'];
     final estadoDetalle = estado['detalle'];
 
-    String buttonText = '';
-    Map<String, dynamic> nextState = {};
-    VoidCallback? onPressed;
+    List<Widget> botones = [];
 
-    final origen = _viajeData!['origen'] ?? '';
-    final destino = _viajeData!['destino'] ?? '';
-
-    switch (estadoPrincipal) {
-      case 'Asignado':
-        if (estadoDetalle == 'Enviada al chofer') {
-          buttonText = 'Confirmar Viaje';
-          nextState = {
-            'principal': 'Asignado',
-            'detalle': 'Confirmada por chofer'
-          };
-        } else {
-          // 'Confirmada por chofer'
-          buttonText = 'Llegué al Origen';
-          nextState = {
-            'principal': 'En Origen',
-            'detalle': 'Chofer en domicilio'
-          };
-        }
-        onPressed = () => _actualizarEstado(nextState);
-        break;
-      case 'En Origen':
-        buttonText = 'Iniciar Viaje (Pasajero a Bordo)';
-        nextState = {
-          'principal': 'Viaje Iniciado',
-          'detalle': 'Pasajero a Bordo'
-        };
-        onPressed = () => _actualizarEstado(nextState);
-        break;
-      case 'Viaje Iniciado':
-        buttonText = 'Finalizar Viaje';
-        nextState = {
-          'principal': 'Finalizado',
-          'detalle': 'Traslado Concluido'
-        };
-        onPressed = () => _actualizarEstado(nextState);
-        break;
-      default:
-        return const SizedBox.shrink();
+    // Estado 1: El viaje acaba de ser asignado, pendiente de aceptación
+    if (estadoPrincipal == 'Asignado' && estadoDetalle == 'Enviada al chofer') {
+      botones.add(
+        FilledButton(
+          child: const Text('Aceptar Viaje'),
+          onPressed: () => _actualizarEstado(
+              {'principal': 'Asignado', 'detalle': 'Aceptada'}),
+          style: FilledButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48)),
+        ),
+      );
+      botones.add(const SizedBox(height: 12));
+      botones.add(
+        OutlinedButton(
+          child: const Text('Rechazar Viaje',
+              style: TextStyle(color: Colors.orangeAccent)),
+          onPressed: _rechazarViaje,
+          style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48)),
+        ),
+      );
+    }
+    // Estado 2: El chofer ya aceptó, se dirige al origen
+    else if (estadoPrincipal == 'Asignado' && estadoDetalle == 'Aceptada') {
+      botones.add(
+        FilledButton.icon(
+          icon: const Icon(Icons.navigation),
+          label: const Text('Navegar al Origen'),
+          onPressed: () => _abrirNavegacion(_viajeData!['origen']),
+          style: FilledButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48)),
+        ),
+      );
+      botones.add(const SizedBox(height: 12));
+      botones.add(
+        OutlinedButton(
+          child: const Text('Pasajero a bordo'),
+          onPressed: () => _actualizarEstado(
+              {'principal': 'En Origen', 'detalle': 'Pasajero a Bordo'}),
+          style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48)),
+        ),
+      );
+      botones.add(const SizedBox(height: 12));
+      botones.add(
+        TextButton(
+          child: const Text('Traslado Negativo',
+              style: TextStyle(color: Colors.redAccent)),
+          onPressed: _marcarTrasladoNegativo,
+          style: TextButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48)),
+        ),
+      );
+    }
+    // Estado 3: El chofer tiene al pasajero y está en viaje
+    else if (estadoPrincipal == 'En Origen' ||
+        estadoPrincipal == 'Viaje Iniciado') {
+      botones.add(
+        FilledButton.icon(
+          icon: const Icon(Icons.navigation),
+          label: const Text('Navegar al Destino'),
+          onPressed: () => _abrirNavegacion(_viajeData!['destino']),
+          style: FilledButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48)),
+        ),
+      );
+      botones.add(const SizedBox(height: 12));
+      botones.add(
+        OutlinedButton(
+          child: const Text('Finalizar Viaje'),
+          onPressed: () => _actualizarEstado(
+              {'principal': 'Finalizado', 'detalle': 'Traslado Concluido'}),
+          style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48)),
+        ),
+      );
     }
 
-    Widget mainButton = SizedBox(
-      width: double.infinity,
-      child: FilledButton(
-        style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 16)),
-        onPressed: _isUpdatingState ? null : onPressed,
-        child: _isUpdatingState
-            ? const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(strokeWidth: 3))
-            : Text(buttonText),
-      ),
-    );
-
-    Widget navButton = OutlinedButton.icon(
-      icon: const Icon(Icons.navigation),
-      label: Text(estadoPrincipal == 'Viaje Iniciado'
-          ? 'Navegar al Destino'
-          : 'Navegar al Origen'),
-      style: OutlinedButton.styleFrom(
-        side: BorderSide(color: Theme.of(context).colorScheme.secondary),
-      ),
-      onPressed: () => _abrirNavegacion(
-          estadoPrincipal == 'Viaje Iniciado' ? destino : origen),
-    );
-
-    return Column(
-      children: [
-        SizedBox(width: double.infinity, child: navButton),
-        const SizedBox(height: 12),
-        mainButton,
-      ],
-    );
+    return _isUpdatingState
+        ? const Center(child: CircularProgressIndicator())
+        : Column(children: botones);
   }
 
-  void _updateMarkersAndCamera() {
-    if (_viajeData == null || _mapController == null) return;
-    final origenCoords = _viajeData!['origen_coords'] as GeoPoint?;
-    final destinoCoords = _viajeData!['destino_coords'] as GeoPoint?;
-    _markers.clear();
-    if (origenCoords != null) {
-      _markers.add(Marker(
-          markerId: const MarkerId('origen'),
-          position: LatLng(origenCoords.latitude, origenCoords.longitude),
-          infoWindow: const InfoWindow(title: 'Origen'),
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-              BitmapDescriptor.hueGreen)));
+  // --- NUEVA FUNCIÓN PARA RECHAZAR ---
+  Future<void> _rechazarViaje() async {
+    if (_isUpdatingState) return;
+    setState(() => _isUpdatingState = true);
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      String nombreChofer = 'Chofer';
+      if (user != null &&
+          user.displayName != null &&
+          user.displayName!.isNotEmpty) {
+        nombreChofer = user.displayName!;
+      }
+
+      // Devolver la reserva a 'En Curso' y quitar la asignación
+      await FirebaseFirestore.instance
+          .collection('reservas')
+          .doc(widget.reservaId)
+          .update({
+        'estado': {
+          'principal': 'En Curso',
+          'detalle': 'Rechazado por $nombreChofer',
+          'actualizado_en': FieldValue.serverTimestamp(),
+        },
+        'chofer_asignado_id': FieldValue.delete(),
+        'movil_asignado_id': FieldValue.delete(),
+      });
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      print("Error al rechazar viaje: $e");
+    } finally {
+      if (mounted) setState(() => _isUpdatingState = false);
     }
-    if (destinoCoords != null) {
-      _markers.add(Marker(
-          markerId: const MarkerId('destino'),
-          position: LatLng(destinoCoords.latitude, destinoCoords.longitude),
-          infoWindow: const InfoWindow(title: 'Destino')));
-    }
-    if (origenCoords != null && destinoCoords != null) {
-      LatLngBounds bounds = LatLngBounds(
-          southwest: LatLng(
-              origenCoords.latitude < destinoCoords.latitude
-                  ? origenCoords.latitude
-                  : destinoCoords.latitude,
-              origenCoords.longitude < destinoCoords.longitude
-                  ? origenCoords.longitude
-                  : destinoCoords.longitude),
-          northeast: LatLng(
-              origenCoords.latitude > destinoCoords.latitude
-                  ? origenCoords.latitude
-                  : destinoCoords.latitude,
-              origenCoords.longitude > destinoCoords.longitude
-                  ? origenCoords.longitude
-                  : destinoCoords.longitude));
-      _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 50));
-    } else if (origenCoords != null) {
-      _mapController!.animateCamera(CameraUpdate.newLatLngZoom(
-          LatLng(origenCoords.latitude, origenCoords.longitude), 14));
-    }
-    if (mounted) setState(() {});
   }
 
-  // --- 6. FUNCIÓN DE NAVEGACIÓN CORREGIDA ---
+  // --- NUEVA FUNCIÓN PARA TRASLADO NEGATIVO ---
+  Future<void> _marcarTrasladoNegativo() async {
+    if (_isUpdatingState) return;
+    setState(() => _isUpdatingState = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('reservas')
+          .doc(widget.reservaId)
+          .update({
+        'estado': {
+          'principal':
+              'En Curso', // Devuelve a la solapa 'En curso' del operador
+          'detalle': 'Traslado negativo',
+          'actualizado_en': FieldValue.serverTimestamp(),
+        },
+        'chofer_asignado_id': FieldValue.delete(),
+        'movil_asignado_id': FieldValue.delete(),
+      });
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      print("Error en traslado negativo: $e");
+    } finally {
+      if (mounted) setState(() => _isUpdatingState = false);
+    }
+  }
+
   Future<void> _abrirNavegacion(String? direccion) async {
     if (direccion == null || direccion.isEmpty) {
-      print('La dirección de destino está vacía.');
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('La dirección no está disponible.')));
       return;
     }
     final Uri googleMapsUrl = Uri.parse(
@@ -293,10 +314,10 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       if (await canLaunchUrl(googleMapsUrl)) {
         await launchUrl(googleMapsUrl, mode: LaunchMode.externalApplication);
       } else {
-        print('No se pudo abrir Google Maps');
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('No se pudo abrir Google Maps.')));
+        }
       }
     } catch (e) {
       print('Error al lanzar URL: $e');
@@ -316,6 +337,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     );
   }
 
+  // --- CAMBIO: Se quita el mapa ---
   Widget _buildTripDetails() {
     final pasajero = _viajeData!['nombre_pasajero'] ?? 'N/A';
     final telefono = _viajeData!['telefono_pasajero'] ?? 'N/A';
@@ -325,16 +347,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
     return Column(
       children: [
-        SizedBox(
-            height: 250,
-            child: GoogleMap(
-                onMapCreated: (controller) {
-                  _mapController = controller;
-                  _updateMarkersAndCamera();
-                },
-                initialCameraPosition: const CameraPosition(
-                    target: LatLng(-32.9575, -60.6393), zoom: 12),
-                markers: _markers)),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(16.0),
@@ -351,7 +363,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding:
+              const EdgeInsets.fromLTRB(16, 16, 16, 24), // Más padding inferior
           child: _buildActionButtons(),
         ),
       ],
