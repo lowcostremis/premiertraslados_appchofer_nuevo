@@ -72,10 +72,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<DocumentSnapshot> _viajesActivos = [];
   bool _isLoading = true;
 
-  // --- NUEVO: Variables para el rastreo de ubicación global ---
   final Location _locationService = Location();
   StreamSubscription<LocationData>? _locationSubscription;
-  // --- FIN NUEVO ---
 
   @override
   void initState() {
@@ -87,9 +85,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _nuevosViajesSubscription?.cancel();
     _viajesActivosSubscription?.cancel();
-    // --- NUEVO: Detener el rastreo al cerrar la pantalla ---
     _detenerRastreoGlobal();
-    // --- FIN NUEVO ---
     super.dispose();
   }
 
@@ -110,9 +106,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       _choferId = choferQuery.docs.first.id;
 
-      // --- NUEVO: Iniciar el rastreo de ubicación global ---
+      // Una vez que tenemos el ID del chofer, iniciamos el rastreo
       _iniciarRastreoGlobal();
-      // --- FIN NUEVO ---
 
       final nuevosViajesQuery = FirebaseFirestore.instance
           .collection('reservas')
@@ -154,10 +149,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // --- NUEVO: Método para iniciar el rastreo de ubicación ---
+  // =======================================================================
+  // FUNCIÓN DE RASTREO GLOBAL (REVISADA Y CON MEJORAS DE DEBUGGING)
+  // =======================================================================
   Future<void> _iniciarRastreoGlobal() async {
     try {
-      // Activar el modo de fondo para que siga funcionando
       await _locationService.enableBackgroundMode(enable: true);
 
       final serviceEnabled = await _locationService.serviceEnabled();
@@ -171,11 +167,11 @@ class _HomeScreenState extends State<HomeScreen> {
         if (permissionGranted != PermissionStatus.granted) return;
       }
 
-      // Evitar iniciar múltiples listeners
       if (_locationSubscription != null) {
         _locationSubscription?.cancel();
       }
 
+      // Escuchamos los cambios de ubicación
       _locationSubscription =
           _locationService.onLocationChanged.handleError((error) {
         print("Error en el stream de ubicación: $error");
@@ -184,12 +180,20 @@ class _HomeScreenState extends State<HomeScreen> {
       }).listen((LocationData currentLocation) {
         if (currentLocation.latitude != null &&
             currentLocation.longitude != null) {
-          // Usamos la función de Firebase para actualizar la ubicación
-          FirebaseFunctions.instanceFor(region: 'us-central1')
+          // <<< MEJORA 1: Mensaje de confirmación en consola >>>
+          print(
+              'Enviando ubicación: Lat ${currentLocation.latitude}, Lng ${currentLocation.longitude}');
+
+          FirebaseFunctions.instance
               .httpsCallable('actualizarUbicacionChofer')
               .call({
             'latitud': currentLocation.latitude,
             'longitud': currentLocation.longitude,
+          })
+              // <<< MEJORA 2: Captura de errores específicos de Firebase >>>
+              .catchError((error) {
+            // Si la llamada a la función falla, veremos el error aquí.
+            print('Error al llamar a la función de Firebase: $error');
           });
         }
       });
@@ -197,26 +201,25 @@ class _HomeScreenState extends State<HomeScreen> {
       print("Error al iniciar el rastreo de ubicación global: $e");
     }
   }
-  // --- FIN NUEVO ---
 
-  // --- NUEVO: Método para detener el rastreo de ubicación ---
   Future<void> _detenerRastreoGlobal() async {
     _locationSubscription?.cancel();
     _locationSubscription = null;
 
-    // Opcional: Limpiar las coordenadas en Firestore al desconectar
+    // Esta función borra las coordenadas del chofer en la base de datos
+    // cuando cierra sesión o la app se cierra por completo. Es un comportamiento esperado.
     if (_choferId != null) {
       try {
         await FirebaseFirestore.instance
             .collection('choferes')
             .doc(_choferId!)
             .update({'coordenadas': FieldValue.delete()});
+        print('Coordenadas limpiadas al cerrar sesión.');
       } catch (e) {
         print("Error al limpiar coordenadas: $e");
       }
     }
   }
-  // --- FIN NUEVO ---
 
   void _mostrarNotificacionDeViaje(
       String reservaId, Map<String, dynamic>? viajeData) {
@@ -238,8 +241,7 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: <Widget>[
             TextButton(
               child: const Text('Rechazar'),
-              onPressed: () => Navigator.of(context)
-                  .pop(), // Se podría implementar una lógica de rechazo aquí
+              onPressed: () => Navigator.of(context).pop(),
             ),
             FilledButton(
               child: const Text('Aceptar'),
@@ -329,10 +331,8 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
-              // --- NUEVO: Detener rastreo antes de cerrar sesión ---
               await _detenerRastreoGlobal();
-              // --- FIN NUEVO ---
-              FirebaseAuth.instance.signOut();
+              await FirebaseAuth.instance.signOut();
             },
           ),
         ],

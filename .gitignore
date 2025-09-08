@@ -1,47 +1,73 @@
-# Miscellaneous
-*.class
+# ==================================
+# Firebase y Node.js (Tu sección)
+# ==================================
+# Logs
+logs
 *.log
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+firebase-debug.*.log*
 
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
+# Firebase cache y config
+.firebase/
+# .firebaserc # Recomendado dejarlo comentado [cite: 3]
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# Archivos de entorno y claves secretas
+.env
+functions/.env
+firebase-service-account.json
 
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
+# Dependencias de Node.js
+node_modules/
+
+# Archivos de runtime y cache
+pids
+*.pid
+*.seed
+*.pid.lock
+.npm
+.eslintcache
+*.tgz
+
+# ==================================
+# Flutter (Sección faltante)
+# ==================================
+# Archivos y carpetas generados por Flutter
+build/
+.flutter-plugins
 .flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
-/coverage/
+.packages
+.dart_tool/
 
-# Symbolication related
-app.*.symbols
+# Archivos específicos de iOS (CocoaPods)
+ios/Pods/
+ios/Flutter/App.framework
+ios/Flutter/engine
+ios/Flutter/flutter_assets
+.ios/
 
-# Obfuscation related
-app.*.map.json
+# Archivos específicos de Android
+.android/
+android/app/src/main/assets/flutter_assets/
+android/app/build/
+android/build/
+android/.gradle/
+android/gradle/
+android/local.properties
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# ==================================
+# Editores de Código y SO
+# ==================================
+# VS Code
+.vscode/
 
-**/google-services.json
+# Android Studio
+.idea/
+*.iml
+*.hprof
+
+# macOS / Windows
+.DS_Store
+Thumbs.db

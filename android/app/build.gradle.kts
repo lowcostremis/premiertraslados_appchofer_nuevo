@@ -58,7 +58,7 @@ android {
     defaultConfig {
         applicationId = "com.example.premiertraslados_appchofer_nuevo"
         // --- ESTA ES LA LÍNEA CORREGIDA ---
-        minSdk = 23
+        minSdk = flutter.minSdkVersion
         targetSdk = 34
 
         versionCode = getVersionCode()
