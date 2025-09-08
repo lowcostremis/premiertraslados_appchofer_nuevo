@@ -12,7 +12,7 @@ firebase-debug.*.log*
 
 # Firebase cache y config
 .firebase/
-# .firebaserc # Recomendado dejarlo comentado [cite: 3]
+# .firebaserc # Recomendado dejarlo comentado
 
 # Archivos de entorno y claves secretas
 .env
@@ -40,6 +40,10 @@ build/
 .flutter-plugins-dependencies
 .packages
 .dart_tool/
+
+# <<< LÍNEA CRÍTICA AÑADIDA AQUÍ >>>
+# Ignora el archivo de lock para forzar una resolución de paquetes limpia en CI/CD
+pubspec.lock
 
 # Archivos específicos de iOS (CocoaPods)
 ios/Pods/
