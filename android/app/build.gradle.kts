@@ -62,7 +62,7 @@ android {
         
         // <<< CORRECCIÓN PRINCIPAL APLICADA AQUÍ >>>
         // Se usa la variable de Flutter para determinar la versión mínima necesaria.
-        minSdk = flutter.minSdkVersion
+        minSdk = 23
         
         targetSdk = 34
         versionCode = getVersionCode()
