@@ -42,7 +42,7 @@ android {
     namespace = "com.example.premiertraslados_appchofer_nuevo"
     // <<< RECOMENDACIÓN APLICADA AQUÍ >>>
     // Se ajusta a 34 para coincidir con la versión de destino (targetSdk)
-    compileSdk = 34
+    compileSdk = 36
 
     lintOptions {
         disable += "Instantiatable"
