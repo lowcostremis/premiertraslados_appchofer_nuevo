@@ -40,7 +40,9 @@ plugins {
 
 android {
     namespace = "com.example.premiertraslados_appchofer_nuevo"
-    compileSdk = 36
+    // <<< RECOMENDACIÓN APLICADA AQUÍ >>>
+    // Se ajusta a 34 para coincidir con la versión de destino (targetSdk)
+    compileSdk = 34
 
     lintOptions {
         disable += "Instantiatable"
@@ -57,10 +59,12 @@ android {
 
     defaultConfig {
         applicationId = "com.example.premiertraslados_appchofer_nuevo"
-        // --- ESTA ES LA LÍNEA CORREGIDA ---
+        
+        // <<< CORRECCIÓN PRINCIPAL APLICADA AQUÍ >>>
+        // Se usa la variable de Flutter para determinar la versión mínima necesaria.
         minSdk = flutter.minSdkVersion
+        
         targetSdk = 34
-
         versionCode = getVersionCode()
         versionName = getVersionName()
     }
@@ -75,4 +79,3 @@ android {
 dependencies {
     // Puedes agregar dependencias específicas de Android aquí si es necesario.
 }
-
