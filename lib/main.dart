@@ -1,9 +1,8 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+import 'package.flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-// Importaciones para el rastreo de ubicación
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:location/location.dart';
 
@@ -106,7 +105,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       _choferId = choferQuery.docs.first.id;
 
-      // Una vez que tenemos el ID del chofer, iniciamos el rastreo
       _iniciarRastreoGlobal();
 
       final nuevosViajesQuery = FirebaseFirestore.instance
@@ -150,7 +148,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // =======================================================================
-  // FUNCIÓN DE RASTREO GLOBAL (REVISADA Y CON MEJORAS DE DEBUGGING)
+  // FUNCIÓN DE RASTREO GLOBAL (VERSIÓN FINAL Y CORREGIDA)
   // =======================================================================
   Future<void> _iniciarRastreoGlobal() async {
     try {
@@ -171,28 +169,28 @@ class _HomeScreenState extends State<HomeScreen> {
         _locationSubscription?.cancel();
       }
 
-      // Escuchamos los cambios de ubicación
       _locationSubscription =
           _locationService.onLocationChanged.handleError((error) {
         print("Error en el stream de ubicación: $error");
         _locationSubscription?.cancel();
         setState(() => _locationSubscription = null);
       }).listen((LocationData currentLocation) {
-        if (currentLocation.latitude != null &&
-            currentLocation.longitude != null) {
-          // <<< MEJORA 1: Mensaje de confirmación en consola >>>
-          print(
-              'Enviando ubicación: Lat ${currentLocation.latitude}, Lng ${currentLocation.longitude}');
+        // Extraemos la latitud y longitud como números 'double'.
+        final double? lat = currentLocation.latitude;
+        final double? lng = currentLocation.longitude;
+
+        // Solo procedemos si ambos valores son números válidos.
+        if (lat != null && lng != null) {
+          print('Enviando ubicación como NÚMEROS: Lat $lat, Lng $lng');
 
           FirebaseFunctions.instance
               .httpsCallable('actualizarUbicacionChofer')
               .call({
-            'latitud': currentLocation.latitude,
-            'longitud': currentLocation.longitude,
-          })
-              // <<< MEJORA 2: Captura de errores específicos de Firebase >>>
-              .catchError((error) {
-            // Si la llamada a la función falla, veremos el error aquí.
+            // <<< CORRECCIÓN DEFINITIVA >>>
+            // Se envían los valores numéricos directamente.
+            'latitud': lat,
+            'longitud': lng,
+          }).catchError((error) {
             print('Error al llamar a la función de Firebase: $error');
           });
         }
@@ -206,8 +204,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _locationSubscription?.cancel();
     _locationSubscription = null;
 
-    // Esta función borra las coordenadas del chofer en la base de datos
-    // cuando cierra sesión o la app se cierra por completo. Es un comportamiento esperado.
     if (_choferId != null) {
       try {
         await FirebaseFirestore.instance
