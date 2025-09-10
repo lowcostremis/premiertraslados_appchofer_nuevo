@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Miscellaneous
 *.class
 *.jar
@@ -26,3 +27,82 @@ gradlew
 gradlew.bat
 local.properties
 .DS_Store
+=======
+# ==================================
+# Firebase y Node.js (Tu sección)
+# ==================================
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+firebase-debug.*.log*
+
+# Firebase cache y config
+.firebase/
+# .firebaserc # Recomendado dejarlo comentado
+
+# Archivos de entorno y claves secretas
+.env
+functions/.env
+firebase-service-account.json
+
+# Dependencias de Node.js
+node_modules/
+
+# Archivos de runtime y cache
+pids
+*.pid
+*.seed
+*.pid.lock
+.npm
+.eslintcache
+*.tgz
+
+# ==================================
+# Flutter (Sección faltante)
+# ==================================
+# Archivos y carpetas generados por Flutter
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.dart_tool/
+
+# <<< LÍNEA CRÍTICA AÑADIDA AQUÍ >>>
+# Ignora el archivo de lock para forzar una resolución de paquetes limpia en CI/CD
+pubspec.lock
+
+# Archivos específicos de iOS (CocoaPods)
+ios/Pods/
+ios/Flutter/App.framework
+ios/Flutter/engine
+ios/Flutter/flutter_assets
+.ios/
+
+# Archivos específicos de Android
+.android/
+android/app/src/main/assets/flutter_assets/
+android/app/build/
+android/build/
+android/.gradle/
+android/gradle/
+android/local.properties
+
+# ==================================
+# Editores de Código y SO
+# ==================================
+# VS Code
+.vscode/
+
+# Android Studio
+.idea/
+*.iml
+*.hprof
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+>>>>>>> 2a3181c248f6d927db3e7a11e30e69ab60aa8f44

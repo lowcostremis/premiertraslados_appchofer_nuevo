@@ -45,5 +45,14 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+<<<<<<< HEAD
 </dict>
 </plist>
+=======
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Necesitamos tu ubicación para mostrar tu posición al operador durante un viaje.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Necesitamos tu ubicación para mostrar tu posición al operador durante un viaje.</string>
+</dict>
+</plist>
+>>>>>>> 2a3181c248f6d927db3e7a11e30e69ab60aa8f44

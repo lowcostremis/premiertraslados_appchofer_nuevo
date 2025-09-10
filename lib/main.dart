@@ -14,7 +14,9 @@ void main() async {
   // Asegura que los bindings de Flutter estén inicializados antes de cualquier otra cosa.
   WidgetsFlutterBinding.ensureInitialized();
   // Inicializa Firebase
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   // Corre la aplicación
   runApp(const MyApp());
 }
@@ -117,16 +119,13 @@ class _HomeScreenState extends State<HomeScreen> {
           .where('estado.principal', isEqualTo: 'Asignado')
           .where('estado.detalle', isEqualTo: 'Enviada al chofer');
 
-      _nuevosViajesSubscription = nuevosViajesQuery.snapshots().listen((
-        snapshot,
-      ) {
+      _nuevosViajesSubscription =
+          nuevosViajesQuery.snapshots().listen((snapshot) {
         for (var change in snapshot.docChanges) {
           if (change.type == DocumentChangeType.added) {
             if (mounted) {
               _mostrarNotificacionDeViaje(
-                change.doc.id,
-                change.doc.data() as Map<String, dynamic>?,
-              );
+                  change.doc.id, change.doc.data() as Map<String, dynamic>?);
             }
           }
         }
@@ -135,14 +134,11 @@ class _HomeScreenState extends State<HomeScreen> {
       final viajesActivosQuery = FirebaseFirestore.instance
           .collection('reservas')
           .where('chofer_asignado_id', isEqualTo: _choferId)
-          .where(
-            'estado.principal',
-            whereIn: ['Asignado', 'En Origen', 'Viaje Iniciado'],
-          );
+          .where('estado.principal',
+              whereIn: ['Asignado', 'En Origen', 'Viaje Iniciado']);
 
-      _viajesActivosSubscription = viajesActivosQuery.snapshots().listen((
-        snapshot,
-      ) {
+      _viajesActivosSubscription =
+          viajesActivosQuery.snapshots().listen((snapshot) {
         if (mounted) {
           setState(() {
             _viajesActivos.clear();
@@ -176,27 +172,28 @@ class _HomeScreenState extends State<HomeScreen> {
         _locationSubscription?.cancel();
       }
 
-      _locationSubscription = _locationService.onLocationChanged
-          .handleError((error) {
-            print("Error en el stream de ubicación: $error");
-            _locationSubscription?.cancel();
-            setState(() => _locationSubscription = null);
-          })
-          .listen((LocationData currentLocation) {
-            final double? lat = currentLocation.latitude;
-            final double? lng = currentLocation.longitude;
+      _locationSubscription =
+          _locationService.onLocationChanged.handleError((error) {
+        print("Error en el stream de ubicación: $error");
+        _locationSubscription?.cancel();
+        setState(() => _locationSubscription = null);
+      }).listen((LocationData currentLocation) {
+        final double? lat = currentLocation.latitude;
+        final double? lng = currentLocation.longitude;
 
-            if (lat != null && lng != null) {
-              print('Enviando ubicación como NÚMEROS: Lat $lat, Lng $lng');
+        if (lat != null && lng != null) {
+          print('Enviando ubicación como NÚMEROS: Lat $lat, Lng $lng');
 
-              FirebaseFunctions.instance
-                  .httpsCallable('actualizarUbicacionChofer')
-                  .call({'latitud': lat, 'longitud': lng})
-                  .catchError((error) {
-                    print('Error al llamar a la función de Firebase: $error');
-                  });
-            }
+          FirebaseFunctions.instance
+              .httpsCallable('actualizarUbicacionChofer')
+              .call({
+            'latitud': lat,
+            'longitud': lng,
+          }).catchError((error) {
+            print('Error al llamar a la función de Firebase: $error');
           });
+        }
+      });
     } catch (e) {
       print("Error al iniciar el rastreo de ubicación global: $e");
     }
@@ -220,9 +217,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _mostrarNotificacionDeViaje(
-    String reservaId,
-    Map<String, dynamic>? viajeData,
-  ) {
+      String reservaId, Map<String, dynamic>? viajeData) {
     if (viajeData == null || !mounted) return;
     showDialog(
       context: context,
@@ -262,12 +257,12 @@ class _HomeScreenState extends State<HomeScreen> {
           .collection('reservas')
           .doc(reservaId)
           .update({
-            'estado': {
-              'principal': 'Asignado',
-              'detalle': 'Aceptada',
-              'actualizado_en': FieldValue.serverTimestamp(),
-            },
-          });
+        'estado': {
+          'principal': 'Asignado',
+          'detalle': 'Aceptada',
+          'actualizado_en': FieldValue.serverTimestamp(),
+        },
+      });
     } catch (e) {
       print("Error al aceptar el viaje: $e");
     }
