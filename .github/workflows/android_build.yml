@@ -34,7 +34,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           # --- CAMBIO REALIZADO AQUÍ: volvemos a una versión de Flutter probada y estable ---
-          flutter-version: '3.22.6' 
+          flutter-version: '3.22.5' 
           channel: 'stable'
           cache: true 
 
