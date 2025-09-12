@@ -1,35 +1,5 @@
-<<<<<<< HEAD
-# Miscellaneous
-*.class
-*.jar
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.buildlog/
-.history
-.svn/
-
-# IntelliJ IDEA
-.idea/
-*.iml
-*.ipr
-*.iws
-out/
-
-# Android Studio
-.gradle/
-app/build/
-build/
-captures/
-gradle/
-gradlew
-gradlew.bat
-local.properties
-.DS_Store
-=======
 # ==================================
-# Firebase y Node.js (Tu sección)
+# Firebase y Node.js
 # ==================================
 # Logs
 logs
@@ -42,7 +12,6 @@ firebase-debug.*.log*
 
 # Firebase cache y config
 .firebase/
-# .firebaserc # Recomendado dejarlo comentado
 
 # Archivos de entorno y claves secretas
 .env
@@ -62,7 +31,7 @@ pids
 *.tgz
 
 # ==================================
-# Flutter (Sección faltante)
+# Flutter
 # ==================================
 # Archivos y carpetas generados por Flutter
 build/
@@ -70,10 +39,6 @@ build/
 .flutter-plugins-dependencies
 .packages
 .dart_tool/
-
-# <<< LÍNEA CRÍTICA AÑADIDA AQUÍ >>>
-# Ignora el archivo de lock para forzar una resolución de paquetes limpia en CI/CD
-pubspec.lock
 
 # Archivos específicos de iOS (CocoaPods)
 ios/Pods/
@@ -97,12 +62,25 @@ android/local.properties
 # VS Code
 .vscode/
 
-# Android Studio
+# Android Studio / IntelliJ
 .idea/
 *.iml
+*.ipr
+*.iws
 *.hprof
+out/
 
 # macOS / Windows
 .DS_Store
 Thumbs.db
->>>>>>> 2a3181c248f6d927db3e7a11e30e69ab60aa8f44
+
+# Miscellaneous
+*.class
+*.jar
+*.pyc
+*.swp
+.atom/
+.buildlog/
+.history
+.svn/
+captures/
