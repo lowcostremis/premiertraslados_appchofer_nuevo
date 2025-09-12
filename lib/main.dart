@@ -5,19 +5,101 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:location/location.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:premiertraslados_appchofer_nuevo/login_screen.dart';
 import 'package:premiertraslados_appchofer_nuevo/trip_detail_screen.dart';
 import 'package:premiertraslados_appchofer_nuevo/firebase_options.dart';
 
-void main() async {
-  // Asegura que los bindings de Flutter estén inicializados antes de cualquier otra cosa.
-  WidgetsFlutterBinding.ensureInitialized();
-  // Inicializa Firebase
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+// 1. Instancia global del plugin de notificaciones
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+// 2. Definir un canal de notificación para Android
+const AndroidNotificationChannel channel = AndroidNotificationChannel(
+  'high_importance_channel', // id del canal
+  'Notificaciones de Viajes', // nombre del canal
+  description: 'Este canal se usa para notificaciones de nuevos viajes.',
+  importance: Importance.max,
+  playSound: true,
+  sound: RawResourceAndroidNotificationSound(
+    'reserva_sound',
+  ), // Nombre del archivo sin la extensión
+);
+
+// 3. Función para mostrar la notificación de NUEVO viaje
+Future<void> showNewTripNotification(String tripId) async {
+  const AndroidNotificationDetails androidPlatformChannelSpecifics =
+      AndroidNotificationDetails(
+        'high_importance_channel', // Debe coincidir con el id del canal
+        'Notificaciones de Viajes',
+        channelDescription:
+            'Este canal se usa para notificaciones de nuevos viajes.',
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+        sound: RawResourceAndroidNotificationSound(
+          'reserva_sound',
+        ), // Nombre del archivo sin la extensión
+        styleInformation: BigTextStyleInformation(''),
+      );
+  const NotificationDetails platformChannelSpecifics = NotificationDetails(
+    android: androidPlatformChannelSpecifics,
   );
-  // Corre la aplicación
+  await flutterLocalNotificationsPlugin.show(
+    0, // ID de la notificación para nuevos viajes
+    '¡Nuevo Viaje Asignado!',
+    'Tienes una nueva reserva pendiente.',
+    platformChannelSpecifics,
+    payload: tripId,
+  );
+}
+
+// 4. Función para mostrar la notificación de CANCELACIÓN (Nueva)
+Future<void> showTripCancelledNotification(String tripId) async {
+  const AndroidNotificationDetails androidPlatformChannelSpecifics =
+      AndroidNotificationDetails(
+        'high_importance_channel', // Usamos el mismo canal
+        'Notificaciones de Viajes',
+        channelDescription:
+            'Este canal se usa para notificaciones de viajes cancelados.',
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+        sound: RawResourceAndroidNotificationSound(
+          'reserva_sound', // Puedes usar un sonido diferente si lo deseas
+        ),
+        styleInformation: BigTextStyleInformation(''),
+      );
+  const NotificationDetails platformChannelSpecifics = NotificationDetails(
+    android: androidPlatformChannelSpecifics,
+  );
+  await flutterLocalNotificationsPlugin.show(
+    1, // ID de notificación diferente para no sobreescribir otras
+    'Reserva Cancelada por el Operador',
+    'Una de tus reservas fue anulada o reasignada.',
+    platformChannelSpecifics,
+    payload: tripId,
+  );
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+  const InitializationSettings initializationSettings = InitializationSettings(
+    android: initializationSettingsAndroid,
+  );
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin
+      >()
+      ?.createNotificationChannel(channel);
+
   runApp(const MyApp());
 }
 
@@ -39,10 +121,9 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// Este Widget decide si mostrar la pantalla de Login o la Home
-// basándose en el estado de autenticación de Firebase.
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
@@ -54,236 +135,161 @@ class AuthWrapper extends StatelessWidget {
           );
         }
         if (snapshot.hasData) {
-          return const HomeScreen();
-        } else {
-          return const LoginScreen();
+          return const MainScreen();
         }
+        return const LoginScreen();
       },
     );
   }
 }
 
-class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+class MainScreen extends StatefulWidget {
+  const MainScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<MainScreen> createState() => _MainScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  StreamSubscription? _nuevosViajesSubscription;
-  StreamSubscription? _viajesActivosSubscription;
-  String? _choferId;
-  final List<DocumentSnapshot> _viajesActivos = [];
-  bool _isLoading = true;
-
-  final Location _locationService = Location();
-  StreamSubscription<LocationData>? _locationSubscription;
+class _MainScreenState extends State<MainScreen> {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFunctions _functions = FirebaseFunctions.instance;
+  final Location _location = Location();
+  StreamSubscription<QuerySnapshot>? _userDocSubscription;
+  String? _userId;
+  List<DocumentSnapshot> _viajesActivos = [];
 
   @override
   void initState() {
     super.initState();
-    _iniciarListeners();
+    _userId = _auth.currentUser?.uid;
+    _iniciarRastreoUbicacion();
+    _escucharViajesActivos();
   }
 
   @override
   void dispose() {
-    _nuevosViajesSubscription?.cancel();
-    _viajesActivosSubscription?.cancel();
-    _detenerRastreoGlobal();
+    _userDocSubscription?.cancel();
     super.dispose();
   }
 
-  Future<void> _iniciarListeners() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
+  Future<void> _iniciarRastreoUbicacion() async {
     try {
-      final choferQuery = await FirebaseFirestore.instance
-          .collection('choferes')
-          .where('auth_uid', isEqualTo: user.uid)
-          .limit(1)
-          .get();
-
-      if (choferQuery.docs.isEmpty) {
-        if (mounted) setState(() => _isLoading = false);
-        return;
-      }
-      _choferId = choferQuery.docs.first.id;
-
-      _iniciarRastreoGlobal();
-
-      final nuevosViajesQuery = FirebaseFirestore.instance
-          .collection('reservas')
-          .where('chofer_asignado_id', isEqualTo: _choferId)
-          .where('estado.principal', isEqualTo: 'Asignado')
-          .where('estado.detalle', isEqualTo: 'Enviada al chofer');
-
-      _nuevosViajesSubscription =
-          nuevosViajesQuery.snapshots().listen((snapshot) {
-        for (var change in snapshot.docChanges) {
-          if (change.type == DocumentChangeType.added) {
-            if (mounted) {
-              _mostrarNotificacionDeViaje(
-                  change.doc.id, change.doc.data());
-            }
-          }
-        }
-      });
-
-      final viajesActivosQuery = FirebaseFirestore.instance
-          .collection('reservas')
-          .where('chofer_asignado_id', isEqualTo: _choferId)
-          .where('estado.principal',
-              whereIn: ['Asignado', 'En Origen', 'Viaje Iniciado']);
-
-      _viajesActivosSubscription =
-          viajesActivosQuery.snapshots().listen((snapshot) {
-        if (mounted) {
-          setState(() {
-            _viajesActivos.clear();
-            _viajesActivos.addAll(snapshot.docs);
-            _isLoading = false;
+      await _location.requestPermission();
+      _location.onLocationChanged.listen((LocationData currentLocation) {
+        if (_userId != null) {
+          _functions.httpsCallable('actualizarUbicacionChofer').call({
+            'userId': _userId,
+            'lat': currentLocation.latitude,
+            'lng': currentLocation.longitude,
           });
         }
       });
     } catch (e) {
-      print("Error al iniciar listeners: $e");
-      if (mounted) setState(() => _isLoading = false);
+      print('Error al iniciar el rastreo de ubicación: $e');
     }
   }
 
-  Future<void> _iniciarRastreoGlobal() async {
-    try {
-      await _locationService.enableBackgroundMode(enable: true);
+  // --- FUNCIÓN MODIFICADA ---
+  void _escucharViajesActivos() {
+    if (_userId == null) return;
+    _userDocSubscription = _firestore
+        .collection('choferes')
+        .where('auth_uid', isEqualTo: _userId)
+        .limit(1)
+        .snapshots()
+        .listen((QuerySnapshot querySnapshot) {
+          if (querySnapshot.docs.isEmpty) {
+            print(
+              "No se encontró un documento de chofer para el UID: $_userId",
+            );
+            return;
+          }
 
-      final serviceEnabled = await _locationService.serviceEnabled();
-      if (!serviceEnabled) {
-        if (!await _locationService.requestService()) return;
-      }
+          final DocumentSnapshot snapshot = querySnapshot.docs.first;
 
-      var permissionGranted = await _locationService.hasPermission();
-      if (permissionGranted == PermissionStatus.denied) {
-        permissionGranted = await _locationService.requestPermission();
-        if (permissionGranted != PermissionStatus.granted) return;
-      }
+          if (snapshot.exists) {
+            final data = snapshot.data() as Map<String, dynamic>;
 
-      if (_locationSubscription != null) {
-        _locationSubscription?.cancel();
-      }
+            // Se asegura que 'viajes_activos' exista y sea una lista
+            final List<dynamic> newViajeIds =
+                data.containsKey('viajes_activos') &&
+                    data['viajes_activos'] is List
+                ? data['viajes_activos']
+                : [];
 
-      _locationSubscription =
-          _locationService.onLocationChanged.handleError((error) {
-        print("Error en el stream de ubicación: $error");
-        _locationSubscription?.cancel();
-        setState(() => _locationSubscription = null);
-      }).listen((LocationData currentLocation) {
-        final double? lat = currentLocation.latitude;
-        final double? lng = currentLocation.longitude;
+            final List<String> oldViajeIds = _viajesActivos
+                .map((doc) => doc.id)
+                .toList();
 
-        if (lat != null && lng != null) {
-          print('Enviando ubicación como NÚMEROS: Lat $lat, Lng $lng');
+            // 1. Detectar NUEVOS viajes
+            final List<String> newReservas = newViajeIds
+                .where((id) => !oldViajeIds.contains(id))
+                .cast<String>()
+                .toList();
 
-          FirebaseFunctions.instance
-              .httpsCallable('actualizarUbicacionChofer')
-              .call({
-            'latitud': lat,
-            'longitud': lng,
-          }).catchError((error) {
-            print('Error al llamar a la función de Firebase: $error');
-          });
-        }
-      });
-    } catch (e) {
-      print("Error al iniciar el rastreo de ubicación global: $e");
-    }
+            if (newReservas.isNotEmpty) {
+              for (final reservaId in newReservas) {
+                showNewTripNotification(reservaId);
+              }
+            }
+
+            // 2. Detectar viajes ELIMINADOS
+            final List<String> removedReservas = oldViajeIds
+                .where((id) => !newViajeIds.contains(id))
+                .cast<String>()
+                .toList();
+
+            if (removedReservas.isNotEmpty) {
+              for (final reservaId in removedReservas) {
+                showTripCancelledNotification(reservaId);
+              }
+            }
+
+            // 3. Actualizar la interfaz de usuario
+            if (newViajeIds.isEmpty) {
+              if (mounted) {
+                setState(() {
+                  _viajesActivos = [];
+                });
+              }
+              return;
+            }
+
+            _firestore
+                .collection('reservas')
+                .where(FieldPath.documentId, whereIn: newViajeIds)
+                .get()
+                .then((querySnapshot) {
+                  if (mounted) {
+                    setState(() {
+                      _viajesActivos = querySnapshot.docs;
+                    });
+                  }
+                });
+          }
+        });
   }
 
   Future<void> _detenerRastreoGlobal() async {
-    _locationSubscription?.cancel();
-    _locationSubscription = null;
-
-    if (_choferId != null) {
-      try {
-        await FirebaseFirestore.instance
-            .collection('choferes')
-            .doc(_choferId!)
-            .update({'coordenadas': FieldValue.delete()});
-        print('Coordenadas limpiadas al cerrar sesión.');
-      } catch (e) {
-        print("Error al limpiar coordenadas: $e");
-      }
-    }
-  }
-
-  void _mostrarNotificacionDeViaje(
-      String reservaId, Map<String, dynamic>? viajeData) {
-    if (viajeData == null || !mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('¡Nuevo Viaje Asignado!'),
-          content: SingleChildScrollView(
-            child: ListBody(
-              children: <Widget>[
-                Text('Origen: ${viajeData['origen'] ?? 'N/A'}'),
-                Text('Destino: ${viajeData['destino'] ?? 'N/A'}'),
-              ],
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Rechazar'),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-            FilledButton(
-              child: const Text('Aceptar'),
-              onPressed: () {
-                _aceptarViaje(reservaId);
-                Navigator.of(context).pop();
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _aceptarViaje(String reservaId) async {
-    try {
-      await FirebaseFirestore.instance
-          .collection('reservas')
-          .doc(reservaId)
-          .update({
-        'estado': {
-          'principal': 'Asignado',
-          'detalle': 'Aceptada',
-          'actualizado_en': FieldValue.serverTimestamp(),
-        },
+    _userDocSubscription?.cancel();
+    if (_userId != null) {
+      _functions.httpsCallable('actualizarUbicacionChofer').call({
+        'userId': _userId,
+        'lat': null,
+        'lng': null,
       });
-    } catch (e) {
-      print("Error al aceptar el viaje: $e");
     }
+    await _auth.signOut();
   }
 
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+  Widget _buildViajesList() {
     if (_viajesActivos.isEmpty) {
       return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: Text(
-            'No tienes viajes activos por el momento.\nEsperando nuevas asignaciones...',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 18, color: Colors.white70),
-          ),
-        ),
+        child: Text('No tienes viajes activos en este momento.'),
       );
     }
+
     return ListView.builder(
       itemCount: _viajesActivos.length,
       itemBuilder: (context, index) {
@@ -328,12 +334,12 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.logout),
             onPressed: () async {
               await _detenerRastreoGlobal();
-              await FirebaseAuth.instance.signOut();
+              // No es necesario llamar a signOut dos veces. _detenerRastreoGlobal ya lo hace.
             },
           ),
         ],
       ),
-      body: _buildBody(),
+      body: _buildViajesList(),
     );
   }
 }
