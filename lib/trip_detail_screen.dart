@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:location/location.dart';
 
@@ -149,7 +148,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
   // --- NUEVA LÓGICA DE BOTONES ---
   Widget _buildActionButtons() {
-    if (_viajeData == null || !(_viajeData!['estado'] is Map)) {
+    if (_viajeData == null || _viajeData!['estado'] is! Map) {
       return const SizedBox.shrink();
     }
 
@@ -163,21 +162,21 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     if (estadoPrincipal == 'Asignado' && estadoDetalle == 'Enviada al chofer') {
       botones.add(
         FilledButton(
-          child: const Text('Aceptar Viaje'),
           onPressed: () => _actualizarEstado(
               {'principal': 'Asignado', 'detalle': 'Aceptada'}),
           style: FilledButton.styleFrom(
               minimumSize: const Size(double.infinity, 48)),
+          child: const Text('Aceptar Viaje'),
         ),
       );
       botones.add(const SizedBox(height: 12));
       botones.add(
         OutlinedButton(
-          child: const Text('Rechazar Viaje',
-              style: TextStyle(color: Colors.orangeAccent)),
           onPressed: _rechazarViaje,
           style: OutlinedButton.styleFrom(
               minimumSize: const Size(double.infinity, 48)),
+          child: const Text('Rechazar Viaje',
+              style: TextStyle(color: Colors.orangeAccent)),
         ),
       );
     }
@@ -195,21 +194,21 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       botones.add(const SizedBox(height: 12));
       botones.add(
         OutlinedButton(
-          child: const Text('Pasajero a bordo'),
           onPressed: () => _actualizarEstado(
               {'principal': 'En Origen', 'detalle': 'Pasajero a Bordo'}),
           style: OutlinedButton.styleFrom(
               minimumSize: const Size(double.infinity, 48)),
+          child: const Text('Pasajero a bordo'),
         ),
       );
       botones.add(const SizedBox(height: 12));
       botones.add(
         TextButton(
-          child: const Text('Traslado Negativo',
-              style: TextStyle(color: Colors.redAccent)),
           onPressed: _marcarTrasladoNegativo,
           style: TextButton.styleFrom(
               minimumSize: const Size(double.infinity, 48)),
+          child: const Text('Traslado Negativo',
+              style: TextStyle(color: Colors.redAccent)),
         ),
       );
     }
@@ -228,11 +227,11 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       botones.add(const SizedBox(height: 12));
       botones.add(
         OutlinedButton(
-          child: const Text('Finalizar Viaje'),
           onPressed: () => _actualizarEstado(
               {'principal': 'Finalizado', 'detalle': 'Traslado Concluido'}),
           style: OutlinedButton.styleFrom(
               minimumSize: const Size(double.infinity, 48)),
+          child: const Text('Finalizar Viaje'),
         ),
       );
     }

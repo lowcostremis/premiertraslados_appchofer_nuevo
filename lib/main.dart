@@ -125,7 +125,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (change.type == DocumentChangeType.added) {
             if (mounted) {
               _mostrarNotificacionDeViaje(
-                  change.doc.id, change.doc.data() as Map<String, dynamic>?);
+                  change.doc.id, change.doc.data());
             }
           }
         }

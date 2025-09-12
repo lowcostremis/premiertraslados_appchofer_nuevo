@@ -13,6 +13,7 @@
         "firebase_auth",
         "firebase_core",
         "flutter",
+        "flutter_local_notifications",
         "google_maps_flutter",
         "location",
         "url_launcher"
@@ -24,7 +25,7 @@
     },
     {
       "name": "flutter_lints",
-      "version": "5.0.0",
+      "version": "6.0.0",
       "dependencies": [
         "lints"
       ]
@@ -48,13 +49,20 @@
       ]
     },
     {
-      "name": "cupertino_icons",
-      "version": "1.0.8",
-      "dependencies": []
+      "name": "flutter_local_notifications",
+      "version": "19.4.1",
+      "dependencies": [
+        "clock",
+        "flutter",
+        "flutter_local_notifications_linux",
+        "flutter_local_notifications_platform_interface",
+        "flutter_local_notifications_windows",
+        "timezone"
+      ]
     },
     {
       "name": "location",
-      "version": "5.0.3",
+      "version": "8.0.1",
       "dependencies": [
         "flutter",
         "location_platform_interface",
@@ -133,6 +141,11 @@
       ]
     },
     {
+      "name": "cupertino_icons",
+      "version": "1.0.8",
+      "dependencies": []
+    },
+    {
       "name": "flutter",
       "version": "0.0.0",
       "dependencies": [
@@ -146,7 +159,7 @@
     },
     {
       "name": "lints",
-      "version": "5.1.1",
+      "version": "6.0.0",
       "dependencies": []
     },
     {
@@ -234,19 +247,58 @@
       ]
     },
     {
+      "name": "timezone",
+      "version": "0.10.1",
+      "dependencies": [
+        "http",
+        "path"
+      ]
+    },
+    {
+      "name": "flutter_local_notifications_platform_interface",
+      "version": "9.1.0",
+      "dependencies": [
+        "plugin_platform_interface"
+      ]
+    },
+    {
+      "name": "flutter_local_notifications_windows",
+      "version": "1.0.2",
+      "dependencies": [
+        "ffi",
+        "flutter",
+        "flutter_local_notifications_platform_interface",
+        "meta",
+        "timezone",
+        "xml"
+      ]
+    },
+    {
+      "name": "flutter_local_notifications_linux",
+      "version": "6.0.0",
+      "dependencies": [
+        "dbus",
+        "ffi",
+        "flutter",
+        "flutter_local_notifications_platform_interface",
+        "path",
+        "xdg_directories"
+      ]
+    },
+    {
       "name": "location_web",
-      "version": "4.2.0",
+      "version": "6.0.1",
       "dependencies": [
         "flutter",
         "flutter_web_plugins",
         "http_parser",
-        "js",
-        "location_platform_interface"
+        "location_platform_interface",
+        "web"
       ]
     },
     {
       "name": "location_platform_interface",
-      "version": "3.1.2",
+      "version": "6.0.1",
       "dependencies": [
         "flutter",
         "plugin_platform_interface"
@@ -380,7 +432,7 @@
     },
     {
       "name": "url_launcher_android",
-      "version": "6.3.18",
+      "version": "6.3.21",
       "dependencies": [
         "flutter",
         "url_launcher_platform_interface"
@@ -485,7 +537,7 @@
     },
     {
       "name": "leak_tracker",
-      "version": "11.0.1",
+      "version": "11.0.2",
       "dependencies": [
         "clock",
         "collection",
@@ -524,11 +576,59 @@
       ]
     },
     {
-      "name": "js",
-      "version": "0.6.7",
+      "name": "http",
+      "version": "1.5.0",
+      "dependencies": [
+        "async",
+        "http_parser",
+        "meta",
+        "web"
+      ]
+    },
+    {
+      "name": "plugin_platform_interface",
+      "version": "2.1.8",
       "dependencies": [
         "meta"
       ]
+    },
+    {
+      "name": "xml",
+      "version": "6.6.1",
+      "dependencies": [
+        "collection",
+        "meta",
+        "petitparser"
+      ]
+    },
+    {
+      "name": "ffi",
+      "version": "2.1.4",
+      "dependencies": []
+    },
+    {
+      "name": "xdg_directories",
+      "version": "0.2.0+3",
+      "dependencies": [
+        "meta",
+        "path",
+        "process"
+      ]
+    },
+    {
+      "name": "dbus",
+      "version": "0.7.11",
+      "dependencies": [
+        "args",
+        "ffi",
+        "meta",
+        "xml"
+      ]
+    },
+    {
+      "name": "web",
+      "version": "1.1.1",
+      "dependencies": []
     },
     {
       "name": "http_parser",
@@ -546,18 +646,6 @@
       "dependencies": [
         "flutter"
       ]
-    },
-    {
-      "name": "plugin_platform_interface",
-      "version": "2.1.8",
-      "dependencies": [
-        "meta"
-      ]
-    },
-    {
-      "name": "web",
-      "version": "1.1.1",
-      "dependencies": []
     },
     {
       "name": "stream_transform",
@@ -599,18 +687,30 @@
       ]
     },
     {
-      "name": "http",
-      "version": "1.5.0",
+      "name": "vm_service",
+      "version": "15.0.2",
+      "dependencies": []
+    },
+    {
+      "name": "petitparser",
+      "version": "7.0.1",
       "dependencies": [
-        "async",
-        "http_parser",
-        "meta",
-        "web"
+        "collection",
+        "meta"
       ]
     },
     {
-      "name": "vm_service",
-      "version": "15.0.2",
+      "name": "process",
+      "version": "4.2.4",
+      "dependencies": [
+        "file",
+        "path",
+        "platform"
+      ]
+    },
+    {
+      "name": "args",
+      "version": "2.7.0",
       "dependencies": []
     },
     {
@@ -626,6 +726,19 @@
       "dependencies": [
         "csslib",
         "source_span"
+      ]
+    },
+    {
+      "name": "platform",
+      "version": "3.1.6",
+      "dependencies": []
+    },
+    {
+      "name": "file",
+      "version": "6.1.4",
+      "dependencies": [
+        "meta",
+        "path"
       ]
     },
     {
