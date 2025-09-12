@@ -33,8 +33,8 @@ jobs:
       - name: Configurar Flutter
         uses: subosito/flutter-action@v2
         with:
-          # --- CAMBIO REALIZADO AQUÍ: se actualiza la versión de Flutter a una más reciente ---
-          flutter-version: '3.22.5'
+          # --- CAMBIO REALIZADO AQUÍ: volvemos a una versión de Flutter probada y estable ---
+          flutter-version: '3.22.2' 
           channel: 'stable'
           cache: true 
 
