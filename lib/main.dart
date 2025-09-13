@@ -31,23 +31,23 @@ const AndroidNotificationChannel channel = AndroidNotificationChannel(
 Future<void> showNewTripNotification(String tripId) async {
   const AndroidNotificationDetails androidPlatformChannelSpecifics =
       AndroidNotificationDetails(
-        'high_importance_channel', // Debe coincidir con el id del canal
-        'Notificaciones de Viajes',
-        channelDescription:
-            'Este canal se usa para notificaciones de nuevos viajes.',
-        importance: Importance.max,
-        priority: Priority.high,
-        playSound: true,
-        sound: RawResourceAndroidNotificationSound(
-          'reserva_sound',
-        ), // Nombre del archivo sin la extensión
-        styleInformation: BigTextStyleInformation(''),
-      );
+    'high_importance_channel',
+    'Notificaciones de Viajes',
+    channelDescription:
+        'Este canal se usa para notificaciones de nuevos viajes.',
+    importance: Importance.max,
+    priority: Priority.high,
+    playSound: true,
+    sound: RawResourceAndroidNotificationSound(
+      'reserva_sound',
+    ),
+    styleInformation: BigTextStyleInformation(''),
+  );
   const NotificationDetails platformChannelSpecifics = NotificationDetails(
     android: androidPlatformChannelSpecifics,
   );
   await flutterLocalNotificationsPlugin.show(
-    0, // ID de la notificación para nuevos viajes
+    0,
     '¡Nuevo Viaje Asignado!',
     'Tienes una nueva reserva pendiente.',
     platformChannelSpecifics,
@@ -55,27 +55,27 @@ Future<void> showNewTripNotification(String tripId) async {
   );
 }
 
-// 4. Función para mostrar la notificación de CANCELACIÓN (Nueva)
+// 4. Función para mostrar la notificación de CANCELACIÓN
 Future<void> showTripCancelledNotification(String tripId) async {
   const AndroidNotificationDetails androidPlatformChannelSpecifics =
       AndroidNotificationDetails(
-        'high_importance_channel', // Usamos el mismo canal
-        'Notificaciones de Viajes',
-        channelDescription:
-            'Este canal se usa para notificaciones de viajes cancelados.',
-        importance: Importance.max,
-        priority: Priority.high,
-        playSound: true,
-        sound: RawResourceAndroidNotificationSound(
-          'reserva_sound', // Puedes usar un sonido diferente si lo deseas
-        ),
-        styleInformation: BigTextStyleInformation(''),
-      );
+    'high_importance_channel',
+    'Notificaciones de Viajes',
+    channelDescription:
+        'Este canal se usa para notificaciones de viajes cancelados.',
+    importance: Importance.max,
+    priority: Priority.high,
+    playSound: true,
+    sound: RawResourceAndroidNotificationSound(
+      'reserva_sound',
+    ),
+    styleInformation: BigTextStyleInformation(''),
+  );
   const NotificationDetails platformChannelSpecifics = NotificationDetails(
     android: androidPlatformChannelSpecifics,
   );
   await flutterLocalNotificationsPlugin.show(
-    1, // ID de notificación diferente para no sobreescribir otras
+    1,
     'Reserva Cancelada por el Operador',
     'Una de tus reservas fue anulada o reasignada.',
     platformChannelSpecifics,
@@ -96,8 +96,7 @@ void main() async {
 
   await flutterLocalNotificationsPlugin
       .resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin
-      >()
+          AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(channel);
 
   runApp(const MyApp());
@@ -156,6 +155,7 @@ class _MainScreenState extends State<MainScreen> {
   final FirebaseFunctions _functions = FirebaseFunctions.instance;
   final Location _location = Location();
   StreamSubscription<QuerySnapshot>? _userDocSubscription;
+  StreamSubscription<QuerySnapshot>? _reservasSubscription;
   String? _userId;
   List<DocumentSnapshot> _viajesActivos = [];
 
@@ -170,6 +170,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void dispose() {
     _userDocSubscription?.cancel();
+    _reservasSubscription?.cancel();
     super.dispose();
   }
 
@@ -190,89 +191,96 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  // --- FUNCIÓN MODIFICADA ---
+  DateTime _getSortableDateTime(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    final fecha = data['fecha_turno'] as String?;
+    final horaPickup = data['hora_pickup'] as String?;
+    final horaTurno = data['hora_turno'] as String?;
+
+    if (fecha == null || fecha.isEmpty) return DateTime(9999);
+    String? horaFinal = (horaPickup != null && horaPickup.isNotEmpty) ? horaPickup : horaTurno;
+    if (horaFinal == null || horaFinal.isEmpty) return DateTime(9999);
+
+    try {
+      return DateTime.parse('${fecha}T$horaFinal');
+    } catch (e) {
+      print('Error de formato de fecha/hora: $e');
+      return DateTime(9999);
+    }
+  }
+
   void _escucharViajesActivos() {
     if (_userId == null) return;
+
     _userDocSubscription = _firestore
         .collection('choferes')
         .where('auth_uid', isEqualTo: _userId)
         .limit(1)
         .snapshots()
         .listen((QuerySnapshot querySnapshot) {
-          if (querySnapshot.docs.isEmpty) {
-            print(
-              "No se encontró un documento de chofer para el UID: $_userId",
-            );
-            return;
-          }
+      _reservasSubscription?.cancel();
 
-          final DocumentSnapshot snapshot = querySnapshot.docs.first;
+      if (querySnapshot.docs.isEmpty) {
+        if (mounted) setState(() => _viajesActivos = []);
+        return;
+      }
 
-          if (snapshot.exists) {
-            final data = snapshot.data() as Map<String, dynamic>;
+      final DocumentSnapshot snapshot = querySnapshot.docs.first;
 
-            // Se asegura que 'viajes_activos' exista y sea una lista
-            final List<dynamic> newViajeIds =
-                data.containsKey('viajes_activos') &&
-                    data['viajes_activos'] is List
+      if (snapshot.exists) {
+        final data = snapshot.data() as Map<String, dynamic>;
+        final List<dynamic> newViajeIds =
+            data.containsKey('viajes_activos') && data['viajes_activos'] is List
                 ? data['viajes_activos']
                 : [];
+        
+        // --- INICIO DE LA LÓGICA DE NOTIFICACIÓN RESTAURADA ---
+        final List<String> oldViajeIds = _viajesActivos.map((doc) => doc.id).toList();
 
-            final List<String> oldViajeIds = _viajesActivos
-                .map((doc) => doc.id)
-                .toList();
+        final List<String> newReservas = newViajeIds.where((id) => !oldViajeIds.contains(id)).cast<String>().toList();
+        if (newReservas.isNotEmpty) {
+          for (final reservaId in newReservas) {
+            showNewTripNotification(reservaId);
+          }
+        }
 
-            // 1. Detectar NUEVOS viajes
-            final List<String> newReservas = newViajeIds
-                .where((id) => !oldViajeIds.contains(id))
-                .cast<String>()
-                .toList();
+        final List<String> removedReservas = oldViajeIds.where((id) => !newViajeIds.contains(id)).cast<String>().toList();
+        if (removedReservas.isNotEmpty) {
+          for (final reservaId in removedReservas) {
+            showTripCancelledNotification(reservaId);
+          }
+        }
+        // --- FIN DE LA LÓGICA DE NOTIFICACIÓN ---
 
-            if (newReservas.isNotEmpty) {
-              for (final reservaId in newReservas) {
-                showNewTripNotification(reservaId);
-              }
-            }
+        if (newViajeIds.isEmpty) {
+          if (mounted) setState(() => _viajesActivos = []);
+          return;
+        }
 
-            // 2. Detectar viajes ELIMINADOS
-            final List<String> removedReservas = oldViajeIds
-                .where((id) => !newViajeIds.contains(id))
-                .cast<String>()
-                .toList();
-
-            if (removedReservas.isNotEmpty) {
-              for (final reservaId in removedReservas) {
-                showTripCancelledNotification(reservaId);
-              }
-            }
-
-            // 3. Actualizar la interfaz de usuario
-            if (newViajeIds.isEmpty) {
-              if (mounted) {
-                setState(() {
-                  _viajesActivos = [];
-                });
-              }
-              return;
-            }
-
-            _firestore
-                .collection('reservas')
-                .where(FieldPath.documentId, whereIn: newViajeIds)
-                .get()
-                .then((querySnapshot) {
-                  if (mounted) {
-                    setState(() {
-                      _viajesActivos = querySnapshot.docs;
-                    });
-                  }
-                });
+        _reservasSubscription = _firestore
+            .collection('reservas')
+            .where(FieldPath.documentId, whereIn: newViajeIds)
+            .snapshots()
+            .listen((reservasSnapshot) {
+          if (mounted) {
+            final docs = reservasSnapshot.docs;
+            docs.sort((a, b) {
+              final dateTimeA = _getSortableDateTime(a);
+              final dateTimeB = _getSortableDateTime(b);
+              return dateTimeA.compareTo(dateTimeB);
+            });
+            setState(() {
+              _viajesActivos = docs;
+            });
           }
         });
+      }
+    });
   }
 
   Future<void> _detenerRastreoGlobal() async {
     _userDocSubscription?.cancel();
+    _reservasSubscription?.cancel();
     if (_userId != null) {
       _functions.httpsCallable('actualizarUbicacionChofer').call({
         'userId': _userId,
@@ -296,19 +304,73 @@ class _MainScreenState extends State<MainScreen> {
         final viajeDoc = _viajesActivos[index];
         final viaje = viajeDoc.data() as Map<String, dynamic>;
 
-        final estadoDetalle = (viaje['estado'] is Map)
-            ? viaje['estado']['detalle'] ?? viaje['estado']['principal']
-            : viaje['estado'];
+        Color cardColor = Theme.of(context).cardColor;
+        final estadoDetalle = (viaje['estado'] is Map) ? viaje['estado']['detalle'] as String? : null;
+        final esExclusivo = viaje['es_exclusivo'] as bool? ?? false;
+        final bool estaPendiente = estadoDetalle == 'Enviada al chofer';
+
+        if (estaPendiente) {
+          cardColor = esExclusivo
+              ? Colors.purple.withOpacity(0.5)
+              : Colors.amber.withOpacity(0.5);
+        } else {
+          if (esExclusivo) {
+            cardColor = Colors.green.withOpacity(0.4);
+          }
+        }
+
+        final fecha = viaje['fecha_turno'] as String?;
+        final horaPickup = viaje['hora_pickup'] as String?;
+        final horaTurno = viaje['hora_turno'] as String?;
+
+        String horaMostrada = (horaPickup != null && horaPickup.isNotEmpty)
+            ? horaPickup.substring(0, 5)
+            : (horaTurno != null && horaTurno.isNotEmpty)
+                ? horaTurno.substring(0, 5)
+                : '--:--';
+
+        String fechaMostrada = 'Sin fecha';
+        if (fecha != null && fecha.isNotEmpty) {
+          try {
+            final parsedDate = DateTime.parse(fecha);
+            fechaMostrada =
+                '${parsedDate.day.toString().padLeft(2, '0')}/${parsedDate.month.toString().padLeft(2, '0')}/${parsedDate.year}';
+          } catch (e) {
+            fechaMostrada = fecha;
+          }
+        }
 
         return Card(
+          color: cardColor,
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: ListTile(
-            leading: const Icon(Icons.directions_car, color: Colors.amber),
+            leading: const Icon(Icons.directions_car, color: Colors.white70),
             title: Text('Origen: ${viaje['origen'] ?? 'N/A'}'),
             subtitle: Text(
               'Destino: ${viaje['destino'] ?? 'N/A'}\nEstado: $estadoDetalle',
             ),
             isThreeLine: true,
+            trailing: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  horaMostrada,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                Text(
+                  fechaMostrada,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
             onTap: () {
               Navigator.push(
                 context,
@@ -334,7 +396,6 @@ class _MainScreenState extends State<MainScreen> {
             icon: const Icon(Icons.logout),
             onPressed: () async {
               await _detenerRastreoGlobal();
-              // No es necesario llamar a signOut dos veces. _detenerRastreoGlobal ya lo hace.
             },
           ),
         ],
