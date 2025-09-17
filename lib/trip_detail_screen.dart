@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:location/location.dart';
+import 'package:cloud_functions/cloud_functions.dart'; // <-- 1. IMPORTAR
 
 class TripDetailScreen extends StatefulWidget {
   final String reservaId;
@@ -21,6 +22,9 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   final Location _locationService = Location();
   StreamSubscription<LocationData>? _locationSubscription;
   bool _isTrackingStarted = false;
+
+  // <-- 2. CREAR INSTANCIA DE FUNCTIONS
+  final FirebaseFunctions _functions = FirebaseFunctions.instance;
 
   @override
   void initState() {
@@ -68,7 +72,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
   Future<void> _iniciarRastreoUbicacion() async {
     try {
-      // (El código de rastreo de ubicación no se modifica)
       final serviceEnabled = await _locationService.serviceEnabled();
       if (!serviceEnabled) {
         if (!await _locationService.requestService()) return;
@@ -88,7 +91,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       }).listen((LocationData currentLocation) async {
         if (currentLocation.latitude != null &&
             currentLocation.longitude != null) {
-          // Actualiza la ubicación del chofer en su propio documento
           final user = FirebaseAuth.instance.currentUser;
           if (user == null) return;
 
@@ -119,7 +121,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     _locationSubscription = null;
   }
 
-  // --- CAMBIO: Función genérica para actualizar estado ---
   Future<void> _actualizarEstado(Map<String, dynamic> nuevoEstado) async {
     if (_isUpdatingState) return;
     setState(() => _isUpdatingState = true);
@@ -146,7 +147,33 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     }
   }
 
-  // --- NUEVA LÓGICA DE BOTONES ---
+  // --- 4. NUEVA FUNCIÓN PARA LLAMAR AL BACKEND ---
+  Future<void> _finalizarViaje() async {
+    if (_isUpdatingState) return;
+    setState(() => _isUpdatingState = true);
+    try {
+      final callable = _functions.httpsCallable('finalizarViajeDesdeApp');
+      await callable.call({'reservaId': widget.reservaId});
+      
+      if (mounted) {
+         Navigator.of(context).pop();
+      }
+
+    } on FirebaseFunctionsException catch (e) {
+      print("Error al llamar a la Cloud Function: ${e.message}");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: ${e.message}'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingState = false);
+      }
+    }
+  }
+
+
   Widget _buildActionButtons() {
     if (_viajeData == null || _viajeData!['estado'] is! Map) {
       return const SizedBox.shrink();
@@ -158,7 +185,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
     List<Widget> botones = [];
 
-    // Estado 1: El viaje acaba de ser asignado, pendiente de aceptación
     if (estadoPrincipal == 'Asignado' && estadoDetalle == 'Enviada al chofer') {
       botones.add(
         FilledButton(
@@ -180,7 +206,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         ),
       );
     }
-    // Estado 2: El chofer ya aceptó, se dirige al origen
     else if (estadoPrincipal == 'Asignado' && estadoDetalle == 'Aceptada') {
       botones.add(
         FilledButton.icon(
@@ -212,7 +237,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         ),
       );
     }
-    // Estado 3: El chofer tiene al pasajero y está en viaje
     else if (estadoPrincipal == 'En Origen' ||
         estadoPrincipal == 'Viaje Iniciado') {
       botones.add(
@@ -227,8 +251,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       botones.add(const SizedBox(height: 12));
       botones.add(
         OutlinedButton(
-          onPressed: () => _actualizarEstado(
-              {'principal': 'Finalizado', 'detalle': 'Traslado Concluido'}),
+          // --- 3. CAMBIAR LA LLAMADA EN EL BOTÓN ---
+          onPressed: _finalizarViaje,
           style: OutlinedButton.styleFrom(
               minimumSize: const Size(double.infinity, 48)),
           child: const Text('Finalizar Viaje'),
@@ -241,7 +265,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         : Column(children: botones);
   }
 
-  // --- NUEVA FUNCIÓN PARA RECHAZAR ---
   Future<void> _rechazarViaje() async {
     if (_isUpdatingState) return;
     setState(() => _isUpdatingState = true);
@@ -254,7 +277,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         nombreChofer = user.displayName!;
       }
 
-      // Devolver la reserva a 'En Curso' y quitar la asignación
       await FirebaseFirestore.instance
           .collection('reservas')
           .doc(widget.reservaId)
@@ -275,7 +297,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     }
   }
 
-  // --- NUEVA FUNCIÓN PARA TRASLADO NEGATIVO ---
   Future<void> _marcarTrasladoNegativo() async {
     if (_isUpdatingState) return;
     setState(() => _isUpdatingState = true);
@@ -286,7 +307,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           .update({
         'estado': {
           'principal':
-              'En Curso', // Devuelve a la solapa 'En curso' del operador
+              'En Curso', 
           'detalle': 'Traslado negativo',
           'actualizado_en': FieldValue.serverTimestamp(),
         },
@@ -336,7 +357,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     );
   }
 
-  // --- CAMBIO: Se quita el mapa ---
   Widget _buildTripDetails() {
     final pasajero = _viajeData!['nombre_pasajero'] ?? 'N/A';
     final telefono = _viajeData!['telefono_pasajero'] ?? 'N/A';
@@ -363,7 +383,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         ),
         Padding(
           padding:
-              const EdgeInsets.fromLTRB(16, 16, 16, 24), // Más padding inferior
+              const EdgeInsets.fromLTRB(16, 16, 16, 24),
           child: _buildActionButtons(),
         ),
       ],

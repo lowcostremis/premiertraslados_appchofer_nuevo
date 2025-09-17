@@ -1,0 +1,33 @@
+buildscript {
+    // Versión de Kotlin actualizada como recomienda el log de Flutter.
+    ext.kotlin_version = '2.1.0' // <-- MODIFICADO
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        // Versión del plugin de Gradle actualizada para soportar las funciones modernas.
+        classpath 'com.android.tools.build:gradle:8.6.0' // <-- MODIFICADO
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = '../build'
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(':app')
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}

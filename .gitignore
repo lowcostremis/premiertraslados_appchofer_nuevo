@@ -55,6 +55,7 @@ android/build/
 android/.gradle/
 android/gradle/
 android/local.properties
+android/key.properties
 
 # ==================================
 # Editores de Código y SO
