@@ -29,15 +29,15 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # 3. Configura el entorno de Flutter
+      # 3. Configura la versión CORRECTA de Flutter para tu proyecto
       - name: Configurar Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.2' # <-- Esta línea resuelve el problema
+          flutter-version: '3.22.2'
           channel: 'stable'
           cache: true
 
-      # 4. Instala las dependencias del proyecto
+      # 4. Instala las dependencias de tu proyecto Flutter
       - name: Instalar dependencias
         run: flutter pub get
 
