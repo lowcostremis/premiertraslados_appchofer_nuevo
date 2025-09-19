@@ -6,29 +6,25 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:location/location.dart';
+// --- LÍNEA CORREGIDA ---
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:premiertraslados_appchofer_nuevo/login_screen.dart';
 import 'package:premiertraslados_appchofer_nuevo/trip_detail_screen.dart';
 import 'package:premiertraslados_appchofer_nuevo/firebase_options.dart';
 
-// 1. Instancia global del plugin de notificaciones
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
-// 2. Definir un canal de notificación para Android
 const AndroidNotificationChannel channel = AndroidNotificationChannel(
-  'high_importance_channel', // id del canal
-  'Notificaciones de Viajes', // nombre del canal
+  'high_importance_channel',
+  'Notificaciones de Viajes',
   description: 'Este canal se usa para notificaciones de nuevos viajes.',
   importance: Importance.max,
   playSound: true,
-  sound: RawResourceAndroidNotificationSound(
-    'reserva_sound',
-  ), // Nombre del archivo sin la extensión
+  sound: RawResourceAndroidNotificationSound('reserva_sound'),
 );
 
-// 3. Función para mostrar la notificación de NUEVO viaje
 Future<void> showNewTripNotification(String tripId) async {
   const AndroidNotificationDetails androidPlatformChannelSpecifics =
       AndroidNotificationDetails(
@@ -54,7 +50,6 @@ Future<void> showNewTripNotification(String tripId) async {
   );
 }
 
-// 4. Función para mostrar la notificación de CANCELACIÓN
 Future<void> showTripCancelledNotification(String tripId) async {
   const AndroidNotificationDetails androidPlatformChannelSpecifics =
       AndroidNotificationDetails(
@@ -83,7 +78,6 @@ Future<void> showTripCancelledNotification(String tripId) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
   FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
 
   const AndroidInitializationSettings initializationSettingsAndroid =
@@ -159,52 +153,66 @@ class _MainScreenState extends State<MainScreen> {
   String? _userId;
   List<DocumentSnapshot> _viajesActivos = [];
 
+  Timer? _gpsCheckTimer;
+  bool _isGpsDisabled = false;
+
   @override
   void initState() {
     super.initState();
     _userId = _auth.currentUser?.uid;
     _iniciarRastreoUbicacion();
     _escucharViajesActivos();
+
+    _gpsCheckTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      final serviceEnabled = await _location.serviceEnabled();
+      if (serviceEnabled != !_isGpsDisabled) {
+        if (mounted) {
+          setState(() {
+            _isGpsDisabled = !serviceEnabled;
+          });
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
     _userDocSubscription?.cancel();
     _reservasSubscription?.cancel();
+    _gpsCheckTimer?.cancel();
     super.dispose();
   }
 
   Future<void> _iniciarRastreoUbicacion() async {
     try {
       await _location.requestPermission();
-      // Asegúrate de que el servicio de ubicación esté habilitado
       final serviceEnabled = await _location.serviceEnabled();
       if (!serviceEnabled) {
         if (!await _location.requestService()) return;
       }
+      await _location.enableBackgroundMode(enable: true);
 
       _location.onLocationChanged.listen((LocationData currentLocation) {
         final user = _auth.currentUser;
         if (user != null &&
             currentLocation.latitude != null &&
             currentLocation.longitude != null) {
-          // Actualizamos el campo 'coordenadas' directamente
           _firestore
               .collection('choferes')
               .where('auth_uid', isEqualTo: user.uid)
               .limit(1)
               .get()
               .then((querySnapshot) {
-                if (querySnapshot.docs.isNotEmpty) {
-                  final choferId = querySnapshot.docs.first.id;
-                  _firestore.collection('choferes').doc(choferId).update({
-                    'coordenadas': GeoPoint(
-                      currentLocation.latitude!,
-                      currentLocation.longitude!,
-                    ),
-                  });
-                }
+            if (querySnapshot.docs.isNotEmpty) {
+              final choferId = querySnapshot.docs.first.id;
+              _firestore.collection('choferes').doc(choferId).update({
+                'coordenadas': GeoPoint(
+                  currentLocation.latitude!,
+                  currentLocation.longitude!,
+                ),
               });
+            }
+          });
         }
       });
     } catch (e) {
@@ -241,83 +249,74 @@ class _MainScreenState extends State<MainScreen> {
         .limit(1)
         .snapshots()
         .listen((QuerySnapshot querySnapshot) {
-          _reservasSubscription?.cancel();
+      _reservasSubscription?.cancel();
 
-          if (querySnapshot.docs.isEmpty) {
-            if (mounted) setState(() => _viajesActivos = []);
-            return;
-          }
+      if (querySnapshot.docs.isEmpty) {
+        if (mounted) setState(() => _viajesActivos = []);
+        return;
+      }
 
-          final DocumentSnapshot snapshot = querySnapshot.docs.first;
+      final DocumentSnapshot snapshot = querySnapshot.docs.first;
 
-          if (snapshot.exists) {
-            final data = snapshot.data() as Map<String, dynamic>;
-            final List<dynamic> newViajeIds =
-                data.containsKey('viajes_activos') &&
-                    data['viajes_activos'] is List
+      if (snapshot.exists) {
+        final data = snapshot.data() as Map<String, dynamic>;
+        final List<dynamic> newViajeIds =
+            data.containsKey('viajes_activos') && data['viajes_activos'] is List
                 ? data['viajes_activos']
                 : [];
 
-            final List<String> oldViajeIds = _viajesActivos
-                .map((doc) => doc.id)
-                .toList();
+        final List<String> oldViajeIds =
+            _viajesActivos.map((doc) => doc.id).toList();
 
-            final List<String> newReservas = newViajeIds
-                .where((id) => !oldViajeIds.contains(id))
-                .cast<String>()
-                .toList();
-            if (newReservas.isNotEmpty) {
-              for (final reservaId in newReservas) {
-                showNewTripNotification(reservaId);
-              }
-            }
+        final List<String> newReservas = newViajeIds
+            .where((id) => !oldViajeIds.contains(id))
+            .cast<String>()
+            .toList();
+        if (newReservas.isNotEmpty) {
+          for (final reservaId in newReservas) {
+            showNewTripNotification(reservaId);
+          }
+        }
 
-            final List<String> removedReservas = oldViajeIds
-                .where((id) => !newViajeIds.contains(id))
-                .cast<String>()
-                .toList();
-            if (removedReservas.isNotEmpty) {
-              for (final reservaId in removedReservas) {
-                showTripCancelledNotification(reservaId);
-              }
-            }
+        final List<String> removedReservas = oldViajeIds
+            .where((id) => !newViajeIds.contains(id))
+            .cast<String>()
+            .toList();
+        if (removedReservas.isNotEmpty) {
+          for (final reservaId in removedReservas) {
+            showTripCancelledNotification(reservaId);
+          }
+        }
 
-            if (newViajeIds.isEmpty) {
-              if (mounted) setState(() => _viajesActivos = []);
-              return;
-            }
+        if (newViajeIds.isEmpty) {
+          if (mounted) setState(() => _viajesActivos = []);
+          return;
+        }
 
-            _reservasSubscription = _firestore
-                .collection('reservas')
-                .where(FieldPath.documentId, whereIn: newViajeIds)
-                .snapshots()
-                .listen((reservasSnapshot) {
-                  if (mounted) {
-                    final docs = reservasSnapshot.docs;
-                    docs.sort((a, b) {
-                      final dateTimeA = _getSortableDateTime(a);
-                      final dateTimeB = _getSortableDateTime(b);
-                      return dateTimeA.compareTo(dateTimeB);
-                    });
-                    setState(() {
-                      _viajesActivos = docs;
-                    });
-                  }
-                });
+        _reservasSubscription = _firestore
+            .collection('reservas')
+            .where(FieldPath.documentId, whereIn: newViajeIds)
+            .snapshots()
+            .listen((reservasSnapshot) {
+          if (mounted) {
+            final docs = reservasSnapshot.docs;
+            docs.sort((a, b) {
+              final dateTimeA = _getSortableDateTime(a);
+              final dateTimeB = _getSortableDateTime(b);
+              return dateTimeA.compareTo(dateTimeB);
+            });
+            setState(() {
+              _viajesActivos = docs;
+            });
           }
         });
+      }
+    });
   }
 
   Future<void> _detenerRastreoGlobal() async {
     _userDocSubscription?.cancel();
     _reservasSubscription?.cancel();
-    if (_userId != null) {
-      _functions.httpsCallable('actualizarUbicacionChofer').call({
-        'userId': _userId,
-        'lat': null,
-        'lng': null,
-      });
-    }
     await _auth.signOut();
   }
 
@@ -327,7 +326,6 @@ class _MainScreenState extends State<MainScreen> {
         child: Text('No tienes viajes activos en este momento.'),
       );
     }
-
     return ListView.builder(
       itemCount: _viajesActivos.length,
       itemBuilder: (context, index) {
@@ -358,8 +356,8 @@ class _MainScreenState extends State<MainScreen> {
         String horaMostrada = (horaPickup != null && horaPickup.isNotEmpty)
             ? horaPickup.substring(0, 5)
             : (horaTurno != null && horaTurno.isNotEmpty)
-            ? horaTurno.substring(0, 5)
-            : '--:--';
+                ? horaTurno.substring(0, 5)
+                : '--:--';
 
         String fechaMostrada = 'Sin fecha';
         if (fecha != null && fecha.isNotEmpty) {
@@ -417,26 +415,79 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mis Viajes Activos'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.bug_report),
+    return Stack(
+      children: [
+        Scaffold(
+          appBar: AppBar(
+            title: const Text('Mis Viajes Activos'),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.logout),
+                onPressed: () async {
+                  await _detenerRastreoGlobal();
+                },
+              ),
+            ],
+          ),
+          body: _buildViajesList(),
+        ),
+        if (_isGpsDisabled)
+          GpsDisabledOverlay(
             onPressed: () {
-              FirebaseCrashlytics.instance.crash();
-            },
-            tooltip: 'Forzar Cierre',
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await _detenerRastreoGlobal();
+              _location.requestService();
             },
           ),
-        ],
+      ],
+    );
+  }
+}
+
+class GpsDisabledOverlay extends StatelessWidget {
+  final VoidCallback onPressed;
+  const GpsDisabledOverlay({super.key, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black.withOpacity(0.85),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.location_off, color: Colors.amber, size: 80),
+            const SizedBox(height: 20),
+            const Text(
+              'Servicio de GPS Desactivado',
+              style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 10),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 30.0),
+              child: Text(
+                'Para continuar, por favor activa el servicio de ubicación de tu dispositivo.',
+                style: TextStyle(fontSize: 16, color: Colors.white70),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 30),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.settings),
+              label: const Text('Activar GPS'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber,
+                foregroundColor: Colors.black,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+              ),
+              onPressed: onPressed,
+            ),
+          ],
+        ),
       ),
-      body: _buildViajesList(),
     );
   }
 }
