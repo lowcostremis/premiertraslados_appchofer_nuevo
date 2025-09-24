@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
@@ -33,11 +32,9 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   }
 
   void _escucharDetallesDelViaje() {
-    final docRef = FirebaseFirestore.instance
-        .collection('reservas')
-        .doc(widget.reservaId);
+    final docRef =
+        FirebaseFirestore.instance.collection('reservas').doc(widget.reservaId);
     _viajeSubscription = docRef.snapshots().listen((snapshot) {
-      // Este listener es ahora el ÚNICO responsable de cerrar la pantalla si la reserva desaparece
       if (!snapshot.exists && mounted) {
         Navigator.of(context).pop();
         return;
@@ -59,12 +56,12 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           .collection('reservas')
           .doc(widget.reservaId)
           .update({
-            'estado': {
-              'principal': nuevoEstado['principal'],
-              'detalle': nuevoEstado['detalle'],
-              'actualizado_en': FieldValue.serverTimestamp(),
-            },
-          });
+        'estado': {
+          'principal': nuevoEstado['principal'],
+          'detalle': nuevoEstado['detalle'],
+          'actualizado_en': FieldValue.serverTimestamp(),
+        },
+      });
     } catch (e) {
       print("Error al actualizar estado: $e");
     } finally {
@@ -72,30 +69,18 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     }
   }
 
-  // --- FUNCIÓN CORREGIDA ---
   Future<void> _finalizarViaje() async {
     if (_isUpdatingState) return;
     setState(() => _isUpdatingState = true);
     try {
       final callable = _functions.httpsCallable('finalizarViajeDesdeApp');
-      // La función solo llama al backend. No navega.
-      // El listener se encargará de cerrar la pantalla cuando detecte el cambio.
       await callable.call({'reservaId': widget.reservaId});
-
-      // La siguiente línea fue eliminada para evitar el "doble pop"
-      // if (mounted) {
-      //   Navigator.of(context).pop();
-      // }
     } on FirebaseFunctionsException catch (e) {
       print("Error al llamar a la Cloud Function: ${e.message}");
-      // Si hay un error, nos aseguramos de que el usuario pueda volver a intentarlo
       if (mounted) {
         setState(() => _isUpdatingState = false);
       }
     }
-    // El 'finally' se elimina de aquí porque el estado de carga debe
-    // continuar hasta que la pantalla se cierre o haya un error.
-    // Si la llamada es exitosa, el listener cerrará la pantalla.
   }
 
   Future<void> _gestionarRechazoONegativo({required bool esNegativo}) async {
@@ -107,11 +92,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         'reservaId': widget.reservaId,
         'esNegativo': esNegativo,
       });
-
-      // El listener también se encargará de cerrar esta pantalla,
-      // ya que la Cloud Function elimina la reserva de la lista del chofer,
-      // lo que eventualmente hará que la reserva desaparezca de la app.
-      // Por consistencia, también quitamos el pop de aquí.
     } on FirebaseFunctionsException catch (e) {
       print("Error al gestionar rechazo/negativo: ${e.message}");
       if (mounted) {
@@ -261,10 +241,10 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _viajeData == null
-          ? const Center(
-              child: Text('El viaje ha sido finalizado o cancelado.'),
-            )
-          : _buildTripDetails(),
+              ? const Center(
+                  child: Text('El viaje ha sido finalizado o cancelado.'),
+                )
+              : _buildTripDetails(),
     );
   }
 
@@ -288,6 +268,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                   'Teléfono',
                   telefono,
                   canCall: true,
+                  canWhatsApp: true,
                 ),
                 _buildDetailRow(Icons.trip_origin, 'Origen', origen),
                 _buildDetailRow(Icons.flag, 'Destino', destino),
@@ -309,6 +290,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     String label,
     String value, {
     bool canCall = false,
+    bool canWhatsApp = false,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -326,13 +308,30 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
               ],
             ),
           ),
-          if (canCall && value != 'N/A')
+          if (canCall && value.isNotEmpty && value != 'N/A')
             IconButton(
-              icon: const Icon(Icons.call),
+              icon: const Icon(Icons.call, color: Colors.greenAccent),
+              tooltip: 'Llamar al pasajero',
               onPressed: () async {
                 final Uri launchUri = Uri(scheme: 'tel', path: value);
                 if (await canLaunchUrl(launchUri)) {
                   await launchUrl(launchUri);
+                }
+              },
+            ),
+          if (canWhatsApp && value.isNotEmpty && value != 'N/A')
+            IconButton(
+              icon: const Icon(Icons.message, color: Color(0xFF25D366)),
+              tooltip: 'Enviar WhatsApp al pasajero',
+              onPressed: () async {
+                String numeroLimpio = value.replaceAll(RegExp(r'[^\d]'), '');
+                if (!numeroLimpio.startsWith('54')) {
+                  numeroLimpio = '54$numeroLimpio';
+                }
+                final Uri launchUri = Uri.parse('https://wa.me/$numeroLimpio');
+                if (await canLaunchUrl(launchUri)) {
+                  await launchUrl(launchUri,
+                      mode: LaunchMode.externalApplication);
                 }
               },
             ),

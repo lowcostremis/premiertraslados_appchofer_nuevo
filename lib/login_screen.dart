@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:package_info_plus/package_info_plus.dart'; // Importamos el paquete para leer la versión
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -11,48 +12,61 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _auth = FirebaseAuth.instance;
   bool _isLoading = false;
+  String _versionInfo = 'Cargando versión...'; // Variable para mostrar la versión
 
-  Future<void> _login() async {
-    if (_isLoading) return;
-    setState(() {
-      _isLoading = true;
-    });
+  @override
+  void initState() {
+    super.initState();
+    _getVersionInfo(); // Llamamos a la función al iniciar la pantalla
+  }
 
+  // Nueva función para obtener la versión de la app
+  Future<void> _getVersionInfo() async {
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
-    } on FirebaseAuthException catch (e) {
-      String message = 'Ocurrió un error inesperado.';
-      if (e.code == 'user-not-found' ||
-          e.code == 'wrong-password' ||
-          e.code == 'invalid-credential') {
-        message = 'El correo o la contraseña son incorrectos.';
-      } else if (e.code == 'invalid-email') {
-        message = 'El formato del correo electrónico no es válido.';
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message), backgroundColor: Colors.red),
-        );
-      }
-    } finally {
+      final packageInfo = await PackageInfo.fromPlatform();
       if (mounted) {
         setState(() {
-          _isLoading = false;
+          _versionInfo =
+          'Versión: ${packageInfo.version}+${packageInfo.buildNumber}';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _versionInfo = 'Error al leer la versión';
         });
       }
     }
   }
 
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
+  Future<void> _login() async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+    try {
+      // Ocultar el teclado al intentar iniciar sesión
+      FocusScope.of(context).unfocus();
+
+      await _auth.signInWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+      // La navegación a MainScreen es manejada por AuthWrapper, no necesitamos hacer nada aquí.
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message ?? 'Error de autenticación'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   @override
@@ -64,51 +78,35 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text(
-                'Premier App Chofer',
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.amber,
-                ),
-              ),
+              // Aquí podrías poner un logo si quisieras
+              const Text('Premier Traslados',
+                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
               const SizedBox(height: 40),
               TextField(
                 controller: _emailController,
+                decoration: const InputDecoration(labelText: 'Email'),
                 keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: 'Correo Electrónico',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.email),
-                ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               TextField(
                 controller: _passwordController,
+                decoration: const InputDecoration(labelText: 'Contraseña'),
                 obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Contraseña',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.lock),
-                ),
               ),
-              const SizedBox(height: 30),
+              const SizedBox(height: 32),
               _isLoading
                   ? const CircularProgressIndicator()
-                  : SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _login,
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: const Text('Ingresar',
-                            style: TextStyle(fontSize: 18)),
-                      ),
-                    ),
+                  : FilledButton(
+                onPressed: _login,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 48),
+                ),
+                child: const Text('Ingresar'),
+              ),
+              const SizedBox(height: 50),
+              // Aquí mostramos la versión de la app
+              Text(_versionInfo,
+                  style: TextStyle(color: Colors.white.withOpacity(0.5))),
             ],
           ),
         ),

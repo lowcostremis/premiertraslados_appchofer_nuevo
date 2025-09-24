@@ -1,58 +1,70 @@
 plugins {
-    id("com.android.application")
-    id("kotlin-android")
-    id("dev.flutter.flutter-gradle-plugin")
+    id "com.android.application"
+    id "kotlin-android"
+    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    id "dev.flutter.flutter-gradle-plugin"
 }
 
-def keystoreProperties = new Properties()
-// LÍNEA CORREGIDA: Se quita "android/" para evitar la duplicación de la ruta.
-def keystorePropertiesFile = rootProject.file('key.properties')
-keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
 
+def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
+if (flutterVersionCode == null) {
+    flutterVersionCode = '1'
+}
+
+def flutterVersionName = localProperties.getProperty('flutter.versionName')
+if (flutterVersionName == null) {
+    flutterVersionName = '1.0'
+}
 
 android {
-    namespace = "com.example.premiertraslados_appchofer_nuevo"
-    compileSdk = 36
-
-    signingConfigs {
-        release {
-            storeFile file(keystoreProperties.storeFile)
-            storePassword keystoreProperties.storePassword
-            keyAlias keystoreProperties.keyAlias
-            keyPassword keystoreProperties.keyPassword
-        }
-    }
-
-    defaultConfig {
-        applicationId = "com.example.premiertraslados_appchofer_nuevo"
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
-        versionCode = 1
-        versionName = "1.0.0"
-    }
-
-    buildTypes {
-        release {
-            signingConfig signingConfigs.release
-        }
-    }
+    namespace "com.example.premiertraslados_appchofer_nuevo"
+    // --- CORRECCIÓN 1: Actualizamos a la versión de SDK que piden los paquetes ---
+    compileSdk 36
+    // --- CORRECCIÓN 2: Añadimos la versión de NDK que piden los paquetes ---
+    ndkVersion "26.1.10909125"
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+        // --- CORRECCIÓN 3: Habilitamos el "desugaring" que pide el error ---
         coreLibraryDesugaringEnabled true
     }
 
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = '1.8'
+    }
+
+    sourceSets {
+        main.java.srcDirs += 'src/main/kotlin'
+    }
+
+    defaultConfig {
+        applicationId "com.example.premiertraslados_appchofer_nuevo"
+        minSdkVersion flutter.minSdkVersion
+        targetSdkVersion 34 // Mantenemos el targetSdkVersion por ahora
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.debug
+        }
     }
 }
 
 flutter {
-    source = "../.."
+    source '../..'
 }
 
+// --- CORRECCIÓN 4: Añadimos la dependencia para el "desugaring" ---
 dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    implementation(project(":flutter_local_notifications"))
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 }

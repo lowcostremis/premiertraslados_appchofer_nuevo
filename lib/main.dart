@@ -4,16 +4,20 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:location/location.dart';
+import 'package:location/location.dart' as loc;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:premiertraslados_appchofer_nuevo/login_screen.dart';
 import 'package:premiertraslados_appchofer_nuevo/trip_detail_screen.dart';
 import 'package:premiertraslados_appchofer_nuevo/firebase_options.dart';
+import 'package:premiertraslados_appchofer_nuevo/update_checker.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-FlutterLocalNotificationsPlugin();
+    FlutterLocalNotificationsPlugin();
+
+// Contador global para asegurar IDs de notificación únicos
+int _notificationIdCounter = 0;
 
 const AndroidNotificationChannel channel = AndroidNotificationChannel(
   'high_importance_channel',
@@ -26,11 +30,11 @@ const AndroidNotificationChannel channel = AndroidNotificationChannel(
 
 Future<void> showNewTripNotification(String tripId) async {
   const AndroidNotificationDetails androidPlatformChannelSpecifics =
-  AndroidNotificationDetails(
+      AndroidNotificationDetails(
     'high_importance_channel',
     'Notificaciones de Viajes',
     channelDescription:
-    'Este canal se usa para notificaciones de nuevos viajes.',
+        'Este canal se usa para notificaciones de nuevos viajes.',
     importance: Importance.max,
     priority: Priority.high,
     playSound: true,
@@ -41,7 +45,8 @@ Future<void> showNewTripNotification(String tripId) async {
     android: androidPlatformChannelSpecifics,
   );
   await flutterLocalNotificationsPlugin.show(
-    0,
+    // Se usa el contador para generar un ID único
+    _notificationIdCounter++,
     '¡Nuevo Viaje Asignado!',
     'Tienes una nueva reserva pendiente.',
     platformChannelSpecifics,
@@ -51,11 +56,11 @@ Future<void> showNewTripNotification(String tripId) async {
 
 Future<void> showTripCancelledNotification(String tripId) async {
   const AndroidNotificationDetails androidPlatformChannelSpecifics =
-  AndroidNotificationDetails(
+      AndroidNotificationDetails(
     'high_importance_channel',
     'Notificaciones de Viajes',
     channelDescription:
-    'Este canal se usa para notificaciones de viajes cancelados.',
+        'Este canal se usa para notificaciones de viajes cancelados.',
     importance: Importance.max,
     priority: Priority.high,
     playSound: true,
@@ -66,7 +71,7 @@ Future<void> showTripCancelledNotification(String tripId) async {
     android: androidPlatformChannelSpecifics,
   );
   await flutterLocalNotificationsPlugin.show(
-    1,
+    1, // Usamos un ID diferente y fijo para cancelaciones
     'Reserva Cancelada por el Operador',
     'Una de tus reservas fue anulada o reasignada.',
     platformChannelSpecifics,
@@ -77,10 +82,14 @@ Future<void> showTripCancelledNotification(String tripId) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  FirebaseFirestore.instance.settings =
+      const Settings(persistenceEnabled: true);
+
   FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
 
   const AndroidInitializationSettings initializationSettingsAndroid =
-  AndroidInitializationSettings('@mipmap/ic_launcher');
+      AndroidInitializationSettings('@mipmap/ic_launcher');
   const InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,
   );
@@ -88,7 +97,7 @@ void main() async {
 
   await flutterLocalNotificationsPlugin
       .resolvePlatformSpecificImplementation<
-      AndroidFlutterLocalNotificationsPlugin>()
+          AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(channel);
 
   runApp(const MyApp());
@@ -126,7 +135,8 @@ class AuthWrapper extends StatelessWidget {
           );
         }
         if (snapshot.hasData) {
-          return const MainScreen();
+          // Pasa por el verificador de actualizaciones antes de mostrar la pantalla principal
+          return const UpdateCheckWrapper(child: MainScreen());
         }
         return const LoginScreen();
       },
@@ -144,7 +154,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final Location _location = Location();
+  final loc.Location _location = loc.Location();
   StreamSubscription<QuerySnapshot>? _userDocSubscription;
   StreamSubscription<QuerySnapshot>? _reservasSubscription;
   String? _userId;
@@ -203,12 +213,13 @@ class _MainScreenState extends State<MainScreen> {
         _choferDocId = querySnapshot.docs.first.id;
         print('✅ ID del documento del chofer encontrado: $_choferDocId');
 
-        await _firestore
-            .collection('choferes')
-            .doc(_choferDocId)
-            .update({'fcm_token': fcmToken});
+        await _firestore.collection('choferes').doc(_choferDocId).update({
+          'fcm_token': fcmToken,
+          'esta_en_linea': true,
+        });
       } else {
-        print('❌ ERROR: No se encontró documento en la colección "choferes" para el auth_uid: $_userId');
+        print(
+            '❌ ERROR: No se encontró documento en la colección "choferes" para el auth_uid: $_userId');
       }
     }
 
@@ -224,22 +235,33 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _iniciarRastreoUbicacion() async {
     try {
-      await _location.requestPermission();
+      var permissionGranted = await _location.hasPermission();
+      if (permissionGranted == loc.PermissionStatus.denied) {
+        permissionGranted = await _location.requestPermission();
+        if (permissionGranted != loc.PermissionStatus.granted) {
+          return;
+        }
+      }
+
       final serviceEnabled = await _location.serviceEnabled();
       if (!serviceEnabled) {
         if (!await _location.requestService()) return;
       }
 
+      var backgroundPermissionGranted = await _location.hasPermission();
+      if (backgroundPermissionGranted == loc.PermissionStatus.granted) {
+        await _location.enableBackgroundMode(enable: true);
+      }
+
       await _location.changeSettings(
-        accuracy: LocationAccuracy.high,
+        accuracy: loc.LocationAccuracy.high,
         interval: 5000,
         distanceFilter: 10,
       );
 
-      await _location.enableBackgroundMode(enable: true);
-
-      _location.onLocationChanged.listen((LocationData currentLocation) {
-        print('📍 Ubicación recibida: Lat ${currentLocation.latitude}, Lng ${currentLocation.longitude}');
+      _location.onLocationChanged.listen((loc.LocationData currentLocation) {
+        print(
+            '📍 Ubicación recibida: Lat ${currentLocation.latitude}, Lng ${currentLocation.longitude}');
 
         final user = _auth.currentUser;
 
@@ -247,7 +269,6 @@ class _MainScreenState extends State<MainScreen> {
             _choferDocId != null &&
             currentLocation.latitude != null &&
             currentLocation.longitude != null) {
-
           print('📡 Intentando actualizar Firestore con ID: $_choferDocId');
 
           _firestore.collection('choferes').doc(_choferDocId).update({
@@ -255,11 +276,14 @@ class _MainScreenState extends State<MainScreen> {
               currentLocation.latitude!,
               currentLocation.longitude!,
             ),
+            'ultima_actualizacion': FieldValue.serverTimestamp(),
+            'esta_en_linea': true, 
           });
         } else {
           print('⚠️ NO SE ACTUALIZA FIRESTORE. Chequeando condiciones:');
           print('   - User no es null? -----> ${user != null}');
-          print('   - _choferDocId no es null? -> ${_choferDocId != null} (Valor actual: $_choferDocId)');
+          print(
+              '   - _choferDocId no es null? -> ${_choferDocId != null} (Valor actual: $_choferDocId)');
         }
       });
     } catch (e) {
@@ -283,7 +307,7 @@ class _MainScreenState extends State<MainScreen> {
 
     if (fecha == null || fecha.isEmpty) return DateTime(9999);
     String? horaFinal =
-    (horaPickup != null && horaPickup.isNotEmpty) ? horaPickup : horaTurno;
+        (horaPickup != null && horaPickup.isNotEmpty) ? horaPickup : horaTurno;
     if (horaFinal == null || horaFinal.isEmpty) return DateTime(9999);
 
     try {
@@ -318,12 +342,12 @@ class _MainScreenState extends State<MainScreen> {
 
       final data = snapshot.data() as Map<String, dynamic>;
       final List<dynamic> newViajeIds =
-      data.containsKey('viajes_activos') && data['viajes_activos'] is List
-          ? data['viajes_activos']
-          : [];
+          data.containsKey('viajes_activos') && data['viajes_activos'] is List
+              ? data['viajes_activos']
+              : [];
 
       final List<String> oldViajeIds =
-      _viajesActivos.map((doc) => doc.id).toList();
+          _viajesActivos.map((doc) => doc.id).toList();
 
       final List<String> newReservas = newViajeIds
           .where((id) => !oldViajeIds.contains(id))
@@ -375,6 +399,18 @@ class _MainScreenState extends State<MainScreen> {
   Future<void> _detenerRastreoGlobal() async {
     _userDocSubscription?.cancel();
     _reservasSubscription?.cancel();
+
+    if (_choferDocId != null) {
+      try {
+        await _firestore.collection('choferes').doc(_choferDocId).update({
+          'esta_en_linea': false,
+        });
+        print('✅ Estado del chofer actualizado a offline.');
+      } catch (e) {
+        print('❌ Error al actualizar el estado a offline: $e');
+      }
+    }
+
     await _auth.signOut();
   }
 
@@ -421,15 +457,15 @@ class _MainScreenState extends State<MainScreen> {
         String horaMostrada = (horaPickup != null && horaPickup.isNotEmpty)
             ? horaPickup.substring(0, 5)
             : (horaTurno != null && horaTurno.isNotEmpty)
-            ? horaTurno.substring(0, 5)
-            : '--:--';
+                ? horaTurno.substring(0, 5)
+                : '--:--';
 
         String fechaMostrada = 'Sin fecha';
         if (fecha != null && fecha.isNotEmpty) {
           try {
             final parsedDate = DateTime.parse(fecha);
             fechaMostrada =
-            '${parsedDate.day.toString().padLeft(2, '0')}/${parsedDate.month.toString().padLeft(2, '0')}/${parsedDate.year}';
+                '${parsedDate.day.toString().padLeft(2, '0')}/${parsedDate.month.toString().padLeft(2, '0')}/${parsedDate.year}';
           } catch (e) {
             fechaMostrada = fecha;
           }
@@ -546,7 +582,7 @@ class GpsDisabledOverlay extends StatelessWidget {
                 backgroundColor: Colors.amber,
                 foregroundColor: Colors.black,
                 padding:
-                const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                    const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
               ),
               onPressed: onPressed,
             ),
