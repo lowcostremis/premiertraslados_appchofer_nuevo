@@ -1,3 +1,5 @@
+// main.dart
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -13,10 +15,13 @@ import 'package:premiertraslados_appchofer_nuevo/trip_detail_screen.dart';
 import 'package:premiertraslados_appchofer_nuevo/firebase_options.dart';
 import 'package:premiertraslados_appchofer_nuevo/update_checker.dart';
 
+// --- ADAPTACIÓN 1: GlobalKey para Navegación ---
+// Permite navegar desde cualquier parte de la app, incluso desde el callback de notificaciones.
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
-// Contador global para asegurar IDs de notificación únicos
 int _notificationIdCounter = 0;
 
 const AndroidNotificationChannel channel = AndroidNotificationChannel(
@@ -28,63 +33,88 @@ const AndroidNotificationChannel channel = AndroidNotificationChannel(
   sound: RawResourceAndroidNotificationSound('reserva_sound'),
 );
 
-Future<void> showNewTripNotification(String tripId) async {
-  const AndroidNotificationDetails androidPlatformChannelSpecifics =
-      AndroidNotificationDetails(
-    'high_importance_channel',
-    'Notificaciones de Viajes',
-    channelDescription:
-        'Este canal se usa para notificaciones de nuevos viajes.',
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  print("Manejando un mensaje en segundo plano: ${message.messageId}");
+
+  final String? tipoNotificacion = message.data['tipo_notificacion'];
+  final String? tripId = message.data['tripId'];
+
+  if (tripId != null) {
+    // --- ADAPTACIÓN 2: Lógica robusta con switch ---
+    switch (tipoNotificacion) {
+      case 'NUEVO_VIAJE':
+        showNewTripNotification(tripId);
+        break;
+      case 'VIAJE_CANCELADO': // Suponiendo que el backend envía este tipo
+        showTripCancelledNotification(tripId);
+        break;
+      default:
+        print('Tipo de notificación desconocido: $tipoNotificacion');
+        break;
+    }
+  }
+}
+
+// --- ADAPTACIÓN 3: Refactorización de Notificaciones ---
+// Función genérica para mostrar notificaciones locales.
+Future<void> _showLocalNotification({
+  required String title,
+  required String body,
+  required String payload,
+  String sound = 'reserva_sound',
+}) async {
+  final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+    channel.id,
+    channel.name,
+    channelDescription: channel.description,
     importance: Importance.max,
     priority: Priority.high,
     playSound: true,
-    sound: RawResourceAndroidNotificationSound('reserva_sound'),
-    styleInformation: BigTextStyleInformation(''),
+    sound: RawResourceAndroidNotificationSound(sound),
+    styleInformation: const BigTextStyleInformation(''),
   );
-  const NotificationDetails platformChannelSpecifics = NotificationDetails(
-    android: androidPlatformChannelSpecifics,
-  );
+
+  final NotificationDetails platformDetails =
+      NotificationDetails(android: androidDetails);
+
   await flutterLocalNotificationsPlugin.show(
-    // Se usa el contador para generar un ID único
     _notificationIdCounter++,
-    '¡Nuevo Viaje Asignado!',
-    'Tienes una nueva reserva pendiente.',
-    platformChannelSpecifics,
+    title,
+    body,
+    platformDetails,
+    payload: payload,
+  );
+}
+
+// Funciones específicas que ahora usan la función genérica.
+Future<void> showNewTripNotification(String tripId) async {
+  await _showLocalNotification(
+    title: '¡Nuevo Viaje Asignado!',
+    body: 'Tienes una nueva reserva pendiente.',
     payload: tripId,
   );
 }
 
 Future<void> showTripCancelledNotification(String tripId) async {
-  const AndroidNotificationDetails androidPlatformChannelSpecifics =
-      AndroidNotificationDetails(
-    'high_importance_channel',
-    'Notificaciones de Viajes',
-    channelDescription:
-        'Este canal se usa para notificaciones de viajes cancelados.',
-    importance: Importance.max,
-    priority: Priority.high,
-    playSound: true,
-    sound: RawResourceAndroidNotificationSound('reserva_sound'),
-    styleInformation: BigTextStyleInformation(''),
-  );
-  const NotificationDetails platformChannelSpecifics = NotificationDetails(
-    android: androidPlatformChannelSpecifics,
-  );
-  await flutterLocalNotificationsPlugin.show(
-    1, // Usamos un ID diferente y fijo para cancelaciones
-    'Reserva Cancelada por el Operador',
-    'Una de tus reservas fue anulada o reasignada.',
-    platformChannelSpecifics,
+  await _showLocalNotification(
+    title: 'Reserva Cancelada por el Operador',
+    body: 'Una de tus reservas fue anulada o reasignada.',
     payload: tripId,
+    // Podrías usar un sonido diferente si lo tuvieras, ej: sound: 'cancel_sound'
   );
 }
+// --- FIN DE LA ADAPTACIÓN 3 ---
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  FirebaseFirestore.instance.settings =
-      const Settings(persistenceEnabled: true);
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true,
+  );
 
   FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
 
@@ -93,7 +123,21 @@ void main() async {
   const InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,
   );
-  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+
+  await flutterLocalNotificationsPlugin.initialize(
+    initializationSettings,
+    // --- ADAPTACIÓN 4: Navegación al tocar notificación ---
+    onDidReceiveNotificationResponse: (NotificationResponse response) async {
+      final String? payload = response.payload;
+      if (payload != null) {
+        print('Payload de notificación recibido: $payload');
+        // Usamos la GlobalKey para navegar a la pantalla de detalles.
+        navigatorKey.currentState?.push(MaterialPageRoute(
+          builder: (context) => TripDetailScreen(reservaId: payload),
+        ));
+      }
+    },
+  );
 
   await flutterLocalNotificationsPlugin
       .resolvePlatformSpecificImplementation<
@@ -108,6 +152,8 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      // --- ADAPTACIÓN 1 (continuación): Asignamos la GlobalKey ---
+      navigatorKey: navigatorKey,
       title: 'Premier Traslados Chofer',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -135,7 +181,6 @@ class AuthWrapper extends StatelessWidget {
           );
         }
         if (snapshot.hasData) {
-          // Pasa por el verificador de actualizaciones antes de mostrar la pantalla principal
           return const UpdateCheckWrapper(child: MainScreen());
         }
         return const LoginScreen();
@@ -157,18 +202,13 @@ class _MainScreenState extends State<MainScreen> {
   final loc.Location _location = loc.Location();
   StreamSubscription<QuerySnapshot>? _userDocSubscription;
   StreamSubscription<QuerySnapshot>? _reservasSubscription;
+  StreamSubscription<loc.LocationData>? _locationSubscription;
   String? _userId;
   String? _choferDocId;
   List<DocumentSnapshot> _viajesActivos = [];
-
+  bool _isOnline = true;
   Timer? _gpsCheckTimer;
   bool _isGpsDisabled = false;
-
-  Future<void> _pedirPermisos() async {
-    if (await Permission.notification.isDenied) {
-      await Permission.notification.request();
-    }
-  }
 
   @override
   void initState() {
@@ -188,102 +228,120 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
+  @override
+  void dispose() {
+    _userDocSubscription?.cancel();
+    _reservasSubscription?.cancel();
+    _locationSubscription?.cancel();
+    _gpsCheckTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> _inicializarConfiguracionChofer() async {
-    await _pedirPermisos();
-    await _configurarNotificacionesPush();
-    _iniciarRastreoUbicacion();
+    await Permission.notification.request();
+    await _obtenerIdDeChoferYConfigurarFCM();
+    if (_isOnline) {
+      _iniciarRastreoUbicacion();
+    }
     _escucharViajesActivos();
   }
 
-  Future<void> _configurarNotificacionesPush() async {
-    final messaging = FirebaseMessaging.instance;
-    await messaging.requestPermission();
+  Future<void> _obtenerIdDeChoferYConfigurarFCM() async {
+    if (_userId == null) return;
 
-    final fcmToken = await messaging.getToken();
-    print('FCM Token: $fcmToken');
+    final querySnapshot = await _firestore
+        .collection('choferes')
+        .where('auth_uid', isEqualTo: _userId)
+        .limit(1)
+        .get();
 
-    if (fcmToken != null && _userId != null) {
-      final querySnapshot = await _firestore
-          .collection('choferes')
-          .where('auth_uid', isEqualTo: _userId)
-          .limit(1)
-          .get();
+    if (querySnapshot.docs.isNotEmpty) {
+      _choferDocId = querySnapshot.docs.first.id;
+      print('✅ ID del documento del chofer encontrado: $_choferDocId');
 
-      if (querySnapshot.docs.isNotEmpty) {
-        _choferDocId = querySnapshot.docs.first.id;
-        print('✅ ID del documento del chofer encontrado: $_choferDocId');
-
+      final fcmToken = await FirebaseMessaging.instance.getToken();
+      if (fcmToken != null) {
         await _firestore.collection('choferes').doc(_choferDocId).update({
           'fcm_token': fcmToken,
-          'esta_en_linea': true,
         });
-      } else {
-        print(
-            '❌ ERROR: No se encontró documento en la colección "choferes" para el auth_uid: $_userId');
+        print('✅ Token FCM actualizado.');
       }
-    }
 
-    messaging.onTokenRefresh.listen((newToken) async {
-      if (_choferDocId != null) {
-        await _firestore
-            .collection('choferes')
-            .doc(_choferDocId)
-            .update({'fcm_token': newToken});
-      }
-    });
+      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+        if (_choferDocId != null) {
+          await _firestore.collection('choferes').doc(_choferDocId).update({
+            'fcm_token': newToken,
+          });
+        }
+      });
+
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        print('¡Mensaje recibido en primer plano!');
+        final String? tipoNotificacion = message.data['tipo_notificacion'];
+        final String? tripId = message.data['tripId'];
+
+        if (tripId != null) {
+          // --- ADAPTACIÓN 2 (continuación): Lógica robusta con switch ---
+          switch (tipoNotificacion) {
+            case 'NUEVO_VIAJE':
+              showNewTripNotification(tripId);
+              break;
+            case 'VIAJE_CANCELADO':
+              showTripCancelledNotification(tripId);
+              break;
+            default:
+              print('Tipo de notificación desconocido: $tipoNotificacion');
+              break;
+          }
+        }
+      });
+    } else {
+      print('❌ ERROR: No se encontró documento para el auth_uid: $_userId');
+    }
   }
 
   Future<void> _iniciarRastreoUbicacion() async {
+    if (_choferDocId != null) {
+      await _firestore.collection('choferes').doc(_choferDocId).update({
+        'esta_en_linea': true,
+      });
+      print('✅ Chofer puesto en modo online.');
+    }
+
+    _locationSubscription?.cancel();
     try {
       var permissionGranted = await _location.hasPermission();
       if (permissionGranted == loc.PermissionStatus.denied) {
         permissionGranted = await _location.requestPermission();
-        if (permissionGranted != loc.PermissionStatus.granted) {
-          return;
-        }
+        if (permissionGranted != loc.PermissionStatus.granted) return;
       }
-
-      final serviceEnabled = await _location.serviceEnabled();
-      if (!serviceEnabled) {
+      if (!await _location.serviceEnabled()) {
         if (!await _location.requestService()) return;
       }
-
-      var backgroundPermissionGranted = await _location.hasPermission();
-      if (backgroundPermissionGranted == loc.PermissionStatus.granted) {
+      if (await _location.hasPermission() == loc.PermissionStatus.granted) {
         await _location.enableBackgroundMode(enable: true);
       }
-
       await _location.changeSettings(
         accuracy: loc.LocationAccuracy.high,
         interval: 5000,
         distanceFilter: 10,
       );
 
-      _location.onLocationChanged.listen((loc.LocationData currentLocation) {
-        print(
-            '📍 Ubicación recibida: Lat ${currentLocation.latitude}, Lng ${currentLocation.longitude}');
-
-        final user = _auth.currentUser;
-
-        if (user != null &&
-            _choferDocId != null &&
+      _locationSubscription = _location.onLocationChanged.listen((
+        loc.LocationData currentLocation,
+      ) {
+        if (_choferDocId != null &&
             currentLocation.latitude != null &&
             currentLocation.longitude != null) {
-          print('📡 Intentando actualizar Firestore con ID: $_choferDocId');
-
+          // --- ADAPTACIÓN 5: Eliminación de escritura redundante ---
           _firestore.collection('choferes').doc(_choferDocId).update({
             'coordenadas': GeoPoint(
               currentLocation.latitude!,
               currentLocation.longitude!,
             ),
             'ultima_actualizacion': FieldValue.serverTimestamp(),
-            'esta_en_linea': true, 
+            // Se elimina 'esta_en_linea': true de aquí.
           });
-        } else {
-          print('⚠️ NO SE ACTUALIZA FIRESTORE. Chequeando condiciones:');
-          print('   - User no es null? -----> ${user != null}');
-          print(
-              '   - _choferDocId no es null? -> ${_choferDocId != null} (Valor actual: $_choferDocId)');
         }
       });
     } catch (e) {
@@ -291,12 +349,19 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _userDocSubscription?.cancel();
-    _reservasSubscription?.cancel();
-    _gpsCheckTimer?.cancel();
-    super.dispose();
+  Future<void> _detenerRastreoUbicacion() async {
+    _locationSubscription?.cancel();
+    _locationSubscription = null;
+    if (_choferDocId != null) {
+      try {
+        await _firestore.collection('choferes').doc(_choferDocId).update({
+          'esta_en_linea': false,
+        });
+        print('✅ Chofer puesto en modo offline.');
+      } catch (e) {
+        print('❌ Error al poner en modo offline: $e');
+      }
+    }
   }
 
   DateTime _getSortableDateTime(DocumentSnapshot doc) {
@@ -335,44 +400,12 @@ class _MainScreenState extends State<MainScreen> {
       }
 
       final DocumentSnapshot snapshot = querySnapshot.docs.first;
-      if (!snapshot.exists) {
-        if (mounted) setState(() => _viajesActivos = []);
-        return;
-      }
-
       final data = snapshot.data() as Map<String, dynamic>;
-      final List<dynamic> newViajeIds =
-          data.containsKey('viajes_activos') && data['viajes_activos'] is List
-              ? data['viajes_activos']
-              : [];
-
-      final List<String> oldViajeIds =
-          _viajesActivos.map((doc) => doc.id).toList();
-
-      final List<String> newReservas = newViajeIds
-          .where((id) => !oldViajeIds.contains(id))
-          .cast<String>()
-          .toList();
-      if (newReservas.isNotEmpty) {
-        for (final reservaId in newReservas) {
-          showNewTripNotification(reservaId);
-        }
-      }
-      final List<String> removedReservas = oldViajeIds
-          .where((id) => !newViajeIds.contains(id))
-          .cast<String>()
-          .toList();
-      if (removedReservas.isNotEmpty) {
-        for (final reservaId in removedReservas) {
-          showTripCancelledNotification(reservaId);
-        }
-      }
+      final List<dynamic> newViajeIds = data['viajes_activos'] ?? [];
 
       if (newViajeIds.isEmpty) {
         if (mounted) {
-          setState(() {
-            _viajesActivos = [];
-          });
+          setState(() => _viajesActivos = []);
         }
       } else {
         _reservasSubscription = _firestore
@@ -387,31 +420,11 @@ class _MainScreenState extends State<MainScreen> {
               final dateTimeB = _getSortableDateTime(b);
               return dateTimeA.compareTo(dateTimeB);
             });
-            setState(() {
-              _viajesActivos = docs;
-            });
+            setState(() => _viajesActivos = docs);
           }
         });
       }
     });
-  }
-
-  Future<void> _detenerRastreoGlobal() async {
-    _userDocSubscription?.cancel();
-    _reservasSubscription?.cancel();
-
-    if (_choferDocId != null) {
-      try {
-        await _firestore.collection('choferes').doc(_choferDocId).update({
-          'esta_en_linea': false,
-        });
-        print('✅ Estado del chofer actualizado a offline.');
-      } catch (e) {
-        print('❌ Error al actualizar el estado a offline: $e');
-      }
-    }
-
-    await _auth.signOut();
   }
 
   Widget _buildViajesList() {
@@ -444,21 +457,18 @@ class _MainScreenState extends State<MainScreen> {
           cardColor = esExclusivo
               ? Colors.purple.withOpacity(0.5)
               : Colors.amber.withOpacity(0.5);
-        } else {
-          if (esExclusivo) {
-            cardColor = Colors.green.withOpacity(0.4);
-          }
+        } else if (esExclusivo) {
+          cardColor = Colors.green.withOpacity(0.4);
         }
 
         final fecha = viaje['fecha_turno'] as String?;
         final horaPickup = viaje['hora_pickup'] as String?;
         final horaTurno = viaje['hora_turno'] as String?;
-
-        String horaMostrada = (horaPickup != null && horaPickup.isNotEmpty)
-            ? horaPickup.substring(0, 5)
-            : (horaTurno != null && horaTurno.isNotEmpty)
-                ? horaTurno.substring(0, 5)
-                : '--:--';
+        String horaMostrada =
+            ((horaPickup?.isNotEmpty ?? false) ? horaPickup : horaTurno) ??
+                '--:--';
+        if (horaMostrada.length > 5)
+          horaMostrada = horaMostrada.substring(0, 5);
 
         String fechaMostrada = 'Sin fecha';
         if (fecha != null && fecha.isNotEmpty) {
@@ -522,10 +532,27 @@ class _MainScreenState extends State<MainScreen> {
           appBar: AppBar(
             title: const Text('Mis Viajes Activos'),
             actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: Switch(
+                  value: _isOnline,
+                  onChanged: (value) {
+                    setState(() => _isOnline = value);
+                    if (value) {
+                      _iniciarRastreoUbicacion();
+                    } else {
+                      _detenerRastreoUbicacion();
+                    }
+                  },
+                  activeColor: Colors.greenAccent,
+                  inactiveThumbColor: Colors.grey,
+                ),
+              ),
               IconButton(
                 icon: const Icon(Icons.logout),
                 onPressed: () async {
-                  await _detenerRastreoGlobal();
+                  await _detenerRastreoUbicacion();
+                  await _auth.signOut();
                 },
               ),
             ],
@@ -534,9 +561,7 @@ class _MainScreenState extends State<MainScreen> {
         ),
         if (_isGpsDisabled)
           GpsDisabledOverlay(
-            onPressed: () {
-              _location.requestService();
-            },
+            onPressed: () => _location.requestService(),
           ),
       ],
     );
@@ -549,7 +574,7 @@ class GpsDisabledOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return Material(
       color: Colors.black.withOpacity(0.85),
       child: Center(
         child: Column(
