@@ -1,13 +1,26 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Permisos de Ubicación (estos ya los tenías y están bien) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- ===== INICIO DE LA CORRECCIÓN ===== -->
+    <!-- 1. PERMISO FALTANTE: Permite que la app corra como un servicio en primer plano -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- ===== FIN DE LA CORRECCIÓN ===== -->
 
     <application
         android:label="Premier Traslados Chofer"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+
+        <!-- ===== INICIO DE LA CORRECCIÓN ===== -->
+        <!-- 2. SERVICIO FALTANTE: Declara el servicio que usa el paquete 'location' -->
+        <service android:name="com.lyokone.location.FlutterLocationService" android:foregroundServiceType="location" />
+        <!-- ===== FIN DE LA CORRECCIÓN ===== -->
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -28,6 +41,10 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+            
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="high_importance_channel" />
     </application>
 
     <queries>
@@ -39,6 +56,6 @@
             <action android:name="android.intent.action.DIAL" />
             <data android:scheme="tel" />
         </intent>
-        <package android:name="com.whatsapp"/>
     </queries>
 </manifest>
+
