@@ -143,7 +143,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     }
 
     final Uri googleMapsUrl = Uri.parse(
-      'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(direccion)}',
+      'https://www.google.com/maps/dir/?api=1&destination=${Uri.encodeComponent(direccion)}'
     );
 
     try {
@@ -176,6 +176,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     final cliente = _viajeData!['cliente_nombre'] ?? 'N/A';
     final pasajero = _viajeData!['nombre_pasajero'] ?? 'N/A';
     final telefono = _viajeData!['telefono_pasajero'] ?? 'N/A';
+    final horaTurno = _viajeData!['hora_turno'] as String? ?? '';
+    final horaPickup = _viajeData!['hora_pickup'] as String? ?? '';
     final origen = _viajeData!['origen'] ?? 'N/A';
     final destino = _viajeData!['destino'] ?? 'N/A';
     final observaciones = _viajeData!['observaciones'] ?? 'Sin observaciones';
@@ -195,6 +197,21 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                   canCall: true,
                   canWhatsApp: true,
                 ),
+                if (horaPickup.isNotEmpty)
+                  _buildDetailRow(
+                    Icons.watch_later_outlined,
+                    'Hora de Búsqueda (Pick Up)',
+                    horaPickup,
+                  ),
+
+                // La hora de turno se muestra siempre que exista.
+                if (horaTurno.isNotEmpty)
+                  _buildDetailRow(
+                    Icons.access_time,
+                    'Hora de Turno',
+                    horaTurno,
+                  ),
+
                 _buildDetailRow(Icons.business, 'Cliente', cliente),
                 _buildDetailRow(
                   Icons.trip_origin,
