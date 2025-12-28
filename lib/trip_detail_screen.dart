@@ -1,4 +1,4 @@
-// trip_detail_screen.dart - CÓDIGO COMPLETO Y CORREGIDO
+// lib/trip_detail_screen.dart - VERSIÓN OPTIMIZADA PREMIER TRASLADOS
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -47,8 +47,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         .collection('reservas')
         .doc(widget.reservaId);
     _viajeSubscription = docRef.snapshots().listen((snapshot) {
-      // Simplemente verificamos si existe antes de actualizar el estado.
-      // Ya no hacemos pop desde aquí.
       if (snapshot.exists && mounted) {
         setState(() {
           _viajeData = snapshot.data();
@@ -66,15 +64,15 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           .collection('reservas')
           .doc(widget.reservaId)
           .update({
-            'estado': {
-              'principal': nuevoEstado['principal'],
-              'detalle': nuevoEstado['detalle'],
-              'actualizado_en': FieldValue.serverTimestamp(),
-            },
-          });
+        'estado': {
+          'principal': nuevoEstado['principal'],
+          'detalle': nuevoEstado['detalle'],
+          'actualizado_en': FieldValue.serverTimestamp(),
+        },
+      });
       await widget.onStateChanged?.call();
     } catch (e) {
-      print("Error al actualizar estado: $e");
+      debugPrint("Error al actualizar estado: $e");
     } finally {
       if (mounted) setState(() => _isUpdatingState = false);
     }
@@ -83,81 +81,58 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   Future<void> _finalizarViaje() async {
     if (_isUpdatingState) return;
     setState(() => _isUpdatingState = true);
-
     try {
       final callable = _functions.httpsCallable('finalizarViajeDesdeApp');
       await callable.call({'reservaId': widget.reservaId});
-
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
+      if (mounted) Navigator.of(context).pop();
     } on FirebaseFunctionsException catch (e) {
-      print("Error al llamar a la Cloud Function: ${e.message}");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error al finalizar: ${e.message}')),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _isUpdatingState = false);
-      }
+      if (mounted) setState(() => _isUpdatingState = false);
     }
   }
 
   Future<void> _gestionarRechazoONegativo({required bool esNegativo}) async {
     if (_isUpdatingState) return;
     setState(() => _isUpdatingState = true);
-
     try {
       final callable = _functions.httpsCallable('gestionarRechazoDesdeApp');
       await callable.call({
         'reservaId': widget.reservaId,
         'esNegativo': esNegativo,
       });
-
       if (mounted) Navigator.of(context).pop();
-    } on FirebaseFunctionsException catch (e) {
-      print("Error al gestionar rechazo/negativo: ${e.message}");
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.message}'),
-            backgroundColor: Colors.red,
-          ),
+          const SnackBar(content: Text('Error al procesar la solicitud'), backgroundColor: Colors.red),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _isUpdatingState = false);
-      }
+      if (mounted) setState(() => _isUpdatingState = false);
     }
   }
 
   Future<void> _abrirNavegacion(String? direccion) async {
-    if (direccion == null || direccion.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('La dirección no está disponible.')),
-      );
-      return;
-    }
+    if (direccion == null || direccion.isEmpty) return;
 
-    final Uri googleMapsUrl = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=${Uri.encodeComponent(direccion)}'
-    );
+    // Se usa el esquema nativo de Google Maps para navegación directa
+    final Uri googleMapsUrl = Uri.parse("google.navigation:q=${Uri.encodeComponent(direccion)}");
 
     try {
       if (await canLaunchUrl(googleMapsUrl)) {
-        await launchUrl(googleMapsUrl, mode: LaunchMode.externalApplication);
+        await launchUrl(googleMapsUrl);
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No se pudo abrir Google Maps.')),
-          );
-        }
+        // Fallback a URL de navegador si el esquema nativo falla
+        final Uri webMapsUrl = Uri.parse("https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(direccion)}");
+        await launchUrl(webMapsUrl, mode: LaunchMode.externalApplication);
       }
     } catch (e) {
-      print('Error al lanzar URL: $e');
+      debugPrint('Error al lanzar navegación: $e');
     }
   }
 
@@ -176,11 +151,14 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     final cliente = _viajeData!['cliente_nombre'] ?? 'N/A';
     final pasajero = _viajeData!['nombre_pasajero'] ?? 'N/A';
     final telefono = _viajeData!['telefono_pasajero'] ?? 'N/A';
-    final horaTurno = _viajeData!['hora_turno'] as String? ?? '';
-    final horaPickup = _viajeData!['hora_pickup'] as String? ?? '';
-    final origen = _viajeData!['origen'] ?? 'N/A';
+    final horaTurno = _viajeData!['hora_turno'] ?? '';
+    final horaPickup = _viajeData!['hora_pickup'] ?? '';
+    final origenRaw = _viajeData!['origen'] ?? 'N/A';
     final destino = _viajeData!['destino'] ?? 'N/A';
     final observaciones = _viajeData!['observaciones'] ?? 'Sin observaciones';
+
+    // Desglosar Multi-Origen (Paradas)
+    List<String> paradas = origenRaw.toString().split(' + ');
 
     return Column(
       children: [
@@ -190,41 +168,24 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
             child: ListView(
               children: [
                 _buildDetailRow(Icons.person, 'Pasajero', pasajero),
-                _buildDetailRow(
-                  Icons.phone,
-                  'Teléfono',
-                  telefono,
-                  canCall: true,
-                  canWhatsApp: true,
-                ),
-                if (horaPickup.isNotEmpty)
-                  _buildDetailRow(
-                    Icons.watch_later_outlined,
-                    'Hora de Búsqueda (Pick Up)',
-                    horaPickup,
-                  ),
-
-                // La hora de turno se muestra siempre que exista.
-                if (horaTurno.isNotEmpty)
-                  _buildDetailRow(
-                    Icons.access_time,
-                    'Hora de Turno',
-                    horaTurno,
-                  ),
-
+                _buildDetailRow(Icons.phone, 'Teléfono', telefono, canCall: true, canWhatsApp: true),
+                if (horaPickup.isNotEmpty) _buildDetailRow(Icons.watch_later_outlined, 'Hora Pick Up', horaPickup),
+                if (horaTurno.isNotEmpty) _buildDetailRow(Icons.access_time, 'Hora Turno', horaTurno),
                 _buildDetailRow(Icons.business, 'Cliente', cliente),
-                _buildDetailRow(
-                  Icons.trip_origin,
-                  'Origen',
-                  origen,
-                  canNavigate: true,
-                ),
-                _buildDetailRow(
-                  Icons.flag,
-                  'Destino',
-                  destino,
-                  canNavigate: true,
-                ),
+
+                // Renderizado de paradas
+                ...paradas.asMap().entries.map((entry) {
+                  int idx = entry.key;
+                  String dir = entry.value;
+                  return _buildDetailRow(
+                    idx == 0 ? Icons.trip_origin : Icons.location_on,
+                    idx == 0 ? 'Origen' : 'Parada ${idx + 1}',
+                    dir,
+                    canNavigate: true,
+                  );
+                }),
+
+                _buildDetailRow(Icons.flag, 'Destino', destino, canNavigate: true),
                 _buildDetailRow(Icons.notes, 'Observaciones', observaciones),
               ],
             ),
@@ -239,113 +200,79 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   }
 
   Widget _buildActionButtons() {
-    if (_viajeData == null || _viajeData!['estado'] is! Map) {
-      return const SizedBox.shrink();
-    }
+    if (_viajeData == null || _viajeData!['estado'] is! Map) return const SizedBox.shrink();
+
     final estado = _viajeData!['estado'] as Map<String, dynamic>;
-    final estadoPrincipal = estado['principal'];
-    final estadoDetalle = estado['detalle'];
+    final String principal = estado['principal'] ?? '';
+    final String detalle = estado['detalle'] ?? '';
     List<Widget> botones = [];
 
-    if (estadoPrincipal == 'Asignado' && estadoDetalle == 'Enviada al chofer') {
+    // Sincronizado con reservas.js: el sistema web envía detalle "Enviada" o "Enviada al chofer"
+    if (principal == 'Asignado' && (detalle == 'Enviada' || detalle == 'Enviada al chofer')) {
       botones.add(
         FilledButton(
-          onPressed: () => _actualizarEstado({
-            'principal': 'Asignado',
-            'detalle': 'Aceptada',
-          }),
-          style: FilledButton.styleFrom(
-            minimumSize: const Size(double.infinity, 48),
-          ),
-          child: const Text('Aceptar Viaje'),
+          onPressed: () => _actualizarEstado({'principal': 'Asignado', 'detalle': 'Aceptada'}),
+          style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 48), backgroundColor: Colors.amber),
+          child: const Text('ACEPTAR VIAJE', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
         ),
       );
       botones.add(const SizedBox(height: 12));
       botones.add(
         OutlinedButton(
           onPressed: () => _gestionarRechazoONegativo(esNegativo: false),
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size(double.infinity, 48),
-          ),
-          child: const Text(
-            'Rechazar Viaje',
-            style: TextStyle(color: Colors.orangeAccent),
-          ),
+          style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 48), side: const BorderSide(color: Colors.orange)),
+          child: const Text('RECHAZAR', style: TextStyle(color: Colors.orange)),
         ),
       );
-    } else if (estadoPrincipal == 'Asignado' && estadoDetalle == 'Aceptada') {
+    }
+    else if (principal == 'Asignado' && detalle == 'Aceptada') {
       botones.add(
         FilledButton.icon(
-          icon: const Icon(Icons.navigation),
-          label: const Text('Navegar al Origen'),
-          onPressed: () => _abrirNavegacion(_viajeData!['origen']),
-          style: FilledButton.styleFrom(
-            minimumSize: const Size(double.infinity, 48),
-          ),
+          icon: const Icon(Icons.navigation, color: Colors.black),
+          label: const Text('NAVEGAR AL ORIGEN', style: TextStyle(color: Colors.black)),
+          onPressed: () => _abrirNavegacion(_viajeData!['origen'].toString().split(' + ')[0]),
+          style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 48), backgroundColor: Colors.amber),
         ),
       );
       botones.add(const SizedBox(height: 12));
       botones.add(
         OutlinedButton(
-          onPressed: () => _actualizarEstado({
-            'principal': 'En Origen',
-            'detalle': 'Pasajero a Bordo',
-          }),
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size(double.infinity, 48),
-          ),
-          child: const Text('Pasajero a bordo'),
+          onPressed: () => _actualizarEstado({'principal': 'En Origen', 'detalle': 'Pasajero a Bordo'}),
+          style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 48), side: const BorderSide(color: Colors.greenAccent)),
+          child: const Text('PASAJERO A BORDO', style: TextStyle(color: Colors.greenAccent)),
         ),
       );
       botones.add(const SizedBox(height: 12));
       botones.add(
         TextButton(
           onPressed: () => _gestionarRechazoONegativo(esNegativo: true),
-          style: TextButton.styleFrom(
-            minimumSize: const Size(double.infinity, 48),
-          ),
-          child: const Text(
-            'Traslado Negativo',
-            style: TextStyle(color: Colors.redAccent),
-          ),
+          child: const Text('TRASLADO NEGATIVO', style: TextStyle(color: Colors.redAccent)),
         ),
       );
-    } else if (estadoPrincipal == 'En Origen' ||
-        estadoPrincipal == 'Viaje Iniciado') {
+    }
+    else if (principal == 'En Origen' || principal == 'Viaje Iniciado') {
       botones.add(
         FilledButton.icon(
-          icon: const Icon(Icons.navigation),
-          label: const Text('Navegar al Destino'),
+          icon: const Icon(Icons.navigation, color: Colors.black),
+          label: const Text('NAVEGAR AL DESTINO', style: TextStyle(color: Colors.black)),
           onPressed: () => _abrirNavegacion(_viajeData!['destino']),
-          style: FilledButton.styleFrom(
-            minimumSize: const Size(double.infinity, 48),
-          ),
+          style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 48), backgroundColor: Colors.amber),
         ),
       );
       botones.add(const SizedBox(height: 12));
       botones.add(
         OutlinedButton(
           onPressed: _finalizarViaje,
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size(double.infinity, 48),
-          ),
-          child: const Text('Finalizar Viaje'),
+          style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 48), side: const BorderSide(color: Colors.green, width: 2)),
+          child: const Text('FINALIZAR VIAJE', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
         ),
       );
     }
-    return _isUpdatingState
-        ? const Center(child: CircularProgressIndicator())
-        : Column(children: botones);
+
+    return _isUpdatingState ? const CircularProgressIndicator() : Column(children: botones);
   }
 
-  Widget _buildDetailRow(
-    IconData icon,
-    String label,
-    String value, {
-    bool canCall = false,
-    bool canWhatsApp = false,
-    bool canNavigate = false,
-  }) {
+  Widget _buildDetailRow(IconData icon, String label, String value, {bool canCall = false, bool canWhatsApp = false, bool canNavigate = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
@@ -357,66 +284,21 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: const TextStyle(color: Colors.white70)),
-                Text(
-                  value,
-                  style: const TextStyle(fontSize: 16, color: Colors.white),
-                ),
+                Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                Text(value, style: const TextStyle(fontSize: 15, color: Colors.white)),
               ],
             ),
           ),
           if (canCall && value.isNotEmpty && value != 'N/A')
-            IconButton(
-              icon: const Icon(Icons.call, color: Colors.greenAccent),
-              tooltip: 'Llamar al pasajero',
-              onPressed: () async {
-                final Uri launchUri = Uri(scheme: 'tel', path: value);
-                if (await canLaunchUrl(launchUri)) {
-                  await launchUrl(launchUri);
-                }
-              },
-            ),
+            IconButton(icon: const Icon(Icons.call, color: Colors.greenAccent), onPressed: () => launchUrl(Uri(scheme: 'tel', path: value))),
           if (canWhatsApp && value.isNotEmpty && value != 'N/A')
-            IconButton(
-              icon: const Icon(Icons.message, color: Color(0xFF25D366)),
-              tooltip: 'Enviar WhatsApp al pasajero',
-              onPressed: () async {
-                final scaffoldMessenger = ScaffoldMessenger.of(context);
-                String numeroLimpio = value.replaceAll(RegExp(r'\D'), '');
-                if (numeroLimpio.length == 10) {
-                  numeroLimpio = '549$numeroLimpio';
-                } else if (numeroLimpio.startsWith('54') &&
-                    numeroLimpio.length == 12) {
-                  numeroLimpio = '549${numeroLimpio.substring(2)}';
-                } else if (!numeroLimpio.startsWith('54')) {
-                  numeroLimpio = '549$numeroLimpio';
-                }
-                final Uri launchUri = Uri.parse('https://wa.me/$numeroLimpio');
-                if (await canLaunchUrl(launchUri)) {
-                  await launchUrl(
-                    launchUri,
-                    mode: LaunchMode.externalApplication,
-                  );
-                } else {
-                  if (mounted) {
-                    scaffoldMessenger.showSnackBar(
-                      const SnackBar(
-                        content: Text('No se pudo abrir WhatsApp.'),
-                      ),
-                    );
-                  }
-                }
-              },
-            ),
+            IconButton(icon: const Icon(Icons.message, color: Color(0xFF25D366)), onPressed: () {
+              String num = value.replaceAll(RegExp(r'\D'), '');
+              if (num.length == 10) num = '549$num';
+              launchUrl(Uri.parse('https://wa.me/$num'), mode: LaunchMode.externalApplication);
+            }),
           if (canNavigate)
-            IconButton(
-              icon: const Icon(
-                Icons.navigation_outlined,
-                color: Colors.lightBlueAccent,
-              ),
-              tooltip: 'Navegar a esta dirección',
-              onPressed: () => _abrirNavegacion(value),
-            ),
+            IconButton(icon: const Icon(Icons.navigation_outlined, color: Colors.lightBlueAccent), onPressed: () => _abrirNavegacion(value)),
         ],
       ),
     );
