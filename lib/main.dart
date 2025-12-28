@@ -148,30 +148,42 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<bool> _requestPermissions() async {
-    // 1. Solicita el permiso de ubicación mientras la app está en uso.
-    var status = await Permission.locationWhenInUse.request();
-
-    if (status.isGranted) {
-      print("Permiso de ubicación 'en uso' concedido.");
-
-      // 2. Si se concede, solicita el permiso para ejecutarse siempre (segundo plano).
-      // Esto es crucial para que la app funcione cuando no está en pantalla.
-      var backgroundStatus = await Permission.locationAlways.request();
-
-      if (backgroundStatus.isGranted) {
-        print("Permiso de ubicación 'siempre' concedido.");
-        return true; // Ambos permisos concedidos, ¡éxito!
-      } else {
-        print("Permiso de ubicación 'siempre' DENEGADO.");
-        // Aunque el de segundo plano falle, podemos continuar si el básico fue concedido.
-        return true;
-      }
+  // 1. Permiso básico (Mientras se usa)
+  var statusInUse = await Permission.locationWhenInUse.request();
+  
+  if (statusInUse.isGranted) {
+    // 2. Permiso CRÍTICO (Segundo plano / Siempre)
+    var statusAlways = await Permission.locationAlways.request();
+    
+    if (statusAlways.isGranted) {
+      return true; // Todo perfecto
     } else {
-      print("Permiso de ubicación 'en uso' DENEGADO.");
-      // Aquí podrías mostrar un diálogo al usuario explicando por qué es necesario.
-      return false;
+      // Si el usuario rechaza "Todo el tiempo", le mostramos un aviso y devolvemos FALSE
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Permiso Requerido'),
+            content: const Text('Para que el operador te vea en el mapa mientras usas otras apps o bloqueas la pantalla, debes seleccionar "PERMITIR TODO EL TIEMPO" en la configuración de ubicación.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Entendido'),
+              ),
+              TextButton(
+                onPressed: () => openAppSettings(), // Lleva al usuario a config
+                child: const Text('Abrir Configuración'),
+              ),
+            ],
+          ),
+        );
+      }
+      return false; // DENEGADO
     }
+  } else {
+    return false; // Ni siquiera dio permiso básico
   }
+}
 
   Future<void> _obtenerIdDeChofer() async {
     if (_user == null) return;
@@ -320,59 +332,113 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _toggleEnLinea(bool value) async {
     if (_choferDocId.isEmpty) return;
-    if (value) {
-      bool serviceEnabled = await _location.serviceEnabled();
-      if (!serviceEnabled) {
-        serviceEnabled = await _location.requestService();
-        if (!serviceEnabled) {
-          if (mounted) setState(() => _isGpsEnabled = false);
-          return;
-        }
-      }
-      if (mounted) setState(() => _isGpsEnabled = true);
-    }
-    await _firestore.collection('choferes').doc(_choferDocId).update({
-      'esta_en_linea': value,
-    });
-  }
 
-  Future<void> _activarServicioDeUbicacion() async {
-    if (_locationSubscription != null) return;
-    bool serviceEnabled = await _location.serviceEnabled();
-    if (!serviceEnabled) {
-      if (mounted) setState(() => _isGpsEnabled = false);
+    // A. SI EL CHOFER SE QUIERE DESCONECTAR (OFF)
+    if (!value) {
+      // 1. Apagamos en base de datos inmediatamente
+      await _firestore.collection('choferes').doc(_choferDocId).update({
+        'esta_en_linea': false,
+      });
+      // 2. Cancelamos suscripción de GPS para ahorrar batería
+      _locationSubscription?.cancel();
+      _locationSubscription = null;
+      _location.enableBackgroundMode(enable: false);
+      
+      if (mounted) setState(() { _estaEnLinea = false; _isGpsEnabled = false; });
       return;
     }
+
+    // B. SI EL CHOFER SE QUIERE CONECTAR (ON)
+    // Mostramos un indicador de carga mientras validamos
+    if (mounted) {
+       ScaffoldMessenger.of(context).showSnackBar(
+         const SnackBar(content: Text('📡 Validando señal GPS... Espere.')),
+       );
+    }
+
+    // 1. Validar Permisos Estrictos nuevamente
+    bool permisosOk = await _requestPermissions();
+    if (!permisosOk) {
+       // Si no hay permiso, cortamos aquí. El switch se queda en OFF.
+       if (mounted) setState(() => _estaEnLinea = false);
+       return;
+    }
+
+    // 2. Validar que el GPS esté encendido
+    bool serviceEnabled = await _location.serviceEnabled();
+    if (!serviceEnabled) {
+      serviceEnabled = await _location.requestService();
+      if (!serviceEnabled) {
+         if (mounted) setState(() => _estaEnLinea = false);
+         return;
+      }
+    }
+
+    // 3. PRUEBA DE FUEGO: Obtener una coordenada REAL antes de confirmar
     try {
+       // Intentamos obtener la ubicación actual con un tiempo límite de 5 segundos
+       // Si el GPS está muerto, esto lanzará un error.
+       await _location.getLocation().timeout(const Duration(seconds: 5));
+       
+       // 4. Si llegamos acá, HAY SEÑAL. Activamos el listener continuo.
+       await _activarServicioDeUbicacion();
+
+       // 5. Y FINALMENTE actualizamos la Base de Datos a TRUE
+       await _firestore.collection('choferes').doc(_choferDocId).update({
+          'esta_en_linea': true,
+          'ultima_actualizacion': FieldValue.serverTimestamp(), // Marcamos el inicio
+       });
+       
+       if (mounted) setState(() => _estaEnLinea = true);
+
+    } catch (e) {
+       // Si falló la obtención de ubicación
+       print("Error GPS: $e");
+       if (mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(
+           const SnackBar(
+             content: Text('❌ Error: No se detecta señal GPS. Sal a un lugar despejado e intenta de nuevo.'),
+             backgroundColor: Colors.red,
+             duration: Duration(seconds: 4),
+           ),
+         );
+         // Forzamos el switch a OFF visualmente
+         setState(() => _estaEnLinea = false);
+       }
+    }
+}
+
+Future<void> _activarServicioDeUbicacion() async {
+    // Si ya estamos escuchando, no duplicamos
+    if (_locationSubscription != null) return;
+
+    try {
+      // Activamos modo background explícitamente
       await _location.enableBackgroundMode(enable: true);
+      
+      // Configuración de precisión y frecuencia
       await _location.changeSettings(
-        accuracy: loc.LocationAccuracy.high,
-        interval: 5000,
-        distanceFilter: 10,
+        accuracy: loc.LocationAccuracy.high, // Alta precisión
+        interval: 10000,      // Cada 10 segundos (ahorra batería vs 5000)
+        distanceFilter: 30,   // Mínimo 30 metros de desplazamiento
       );
-      _locationSubscription = _location.onLocationChanged.listen((
-        loc.LocationData currentLocation,
-      ) {
-        print(
-          '📍 Ubicación recibida del GPS: Lat ${currentLocation.latitude}, Long ${currentLocation.longitude}',
-        );
-        if (mounted &&
-            _choferDocId.isNotEmpty &&
-            currentLocation.latitude != null &&
-            currentLocation.longitude != null) {
+
+      _locationSubscription = _location.onLocationChanged.listen((loc.LocationData currentLocation) {
+        // Log para depuración en Android Studio
+        print('📍 GPS ACTIVO: ${currentLocation.latitude}, ${currentLocation.longitude}');
+
+        if (mounted && _choferDocId.isNotEmpty && currentLocation.latitude != null) {
+          // Actualizamos Firestore
           _firestore.collection('choferes').doc(_choferDocId).update({
-            'coordenadas': GeoPoint(
-              currentLocation.latitude!,
-              currentLocation.longitude!,
-            ),
+            'coordenadas': GeoPoint(currentLocation.latitude!, currentLocation.longitude!),
             'ultima_actualizacion': FieldValue.serverTimestamp(),
           });
         }
       });
     } catch (e) {
-      print('Error al activar servicio de ubicación: $e');
+      print('Error fatal al iniciar GPS: $e');
     }
-  }
+}
 
   Widget _buildEstadoIcon(Map<String, dynamic> estado) {
     final String principal = estado['principal'] ?? 'pendiente';
